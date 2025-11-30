@@ -134,9 +134,10 @@ function handleLeaveRoom(ws, roomId, notifyClient = true) {
     });
   }
 
-  // Update client info
-  if (clients.has(ws)) {
-    clients.set(ws, { roomId: null });
+  // Clear client's room association
+  const clientInfo = clients.get(ws);
+  if (clientInfo) {
+    clientInfo.roomId = null;
   }
 
   if (notifyClient) {
@@ -146,7 +147,7 @@ function handleLeaveRoom(ws, roomId, notifyClient = true) {
     });
   }
 
-  console.log(`Client left room ${roomId}. Room now has ${roomClients.size} clients.`);
+  console.log(`Client left room ${roomId}. Room now has ${roomClients ? roomClients.size : 0} clients.`);
 }
 
 /**
@@ -261,9 +262,9 @@ server.listen(PORT, () => {
   console.log(`Sync Player Signaling Server running on port ${PORT}`);
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('Received SIGTERM, shutting down gracefully...');
+// Graceful shutdown handler
+function gracefulShutdown() {
+  console.log('Shutting down gracefully...');
   
   // Close all client connections
   wss.clients.forEach((client) => {
@@ -274,4 +275,8 @@ process.on('SIGTERM', () => {
     console.log('Server closed.');
     process.exit(0);
   });
-});
+}
+
+// Handle termination signals
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);

@@ -255,28 +255,35 @@ async function checkRoomStatus() {
 }
 
 /**
- * Poll for connection status updates
+ * Poll for connection status updates with exponential backoff
  */
 function pollConnectionStatus() {
   let attempts = 0;
-  const maxAttempts = 10;
-  const interval = setInterval(async () => {
+  const maxAttempts = 5;
+  
+  async function checkStatus() {
     attempts++;
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_ROOM_STATUS' });
       if (response.connected) {
         updateConnectionStatus(true);
         showStatus('Connected to sync server!', 'success', 2000);
-        clearInterval(interval);
+        return; // Stop polling
       } else if (attempts >= maxAttempts) {
         updateConnectionStatus(false);
         showStatus('Connection may be slow, sync still works locally', 'info', 3000);
-        clearInterval(interval);
+        return; // Stop polling
       }
+      // Exponential backoff: 1s, 2s, 4s, 8s
+      const delay = Math.pow(2, attempts - 1) * 1000;
+      setTimeout(checkStatus, delay);
     } catch (error) {
-      clearInterval(interval);
+      // Stop polling on error
     }
-  }, 1000);
+  }
+  
+  // Start first check after 1 second
+  setTimeout(checkStatus, 1000);
 }
 
 // Event listeners

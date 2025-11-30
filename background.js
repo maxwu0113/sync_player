@@ -14,7 +14,9 @@ let wsConnection = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 2000;
-// Default signaling server URL (can be configured)
+// Default signaling server URL
+// Users can host their own server using the code in /server directory
+// and change this URL to point to their server
 const DEFAULT_SIGNALING_SERVER = 'wss://sync-player-server.glitch.me';
 let signalingServerUrl = DEFAULT_SIGNALING_SERVER;
 
@@ -84,12 +86,14 @@ function connectToSignalingServer(roomId) {
       // Attempt to reconnect if still in a room
       if (currentRoom && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
-        console.log(`Sync Player: Attempting to reconnect (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+        // Use exponential backoff with jitter to avoid thundering herd
+        const backoffDelay = RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts - 1) + Math.random() * 1000;
+        console.log(`Sync Player: Attempting to reconnect (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) in ${Math.round(backoffDelay)}ms`);
         setTimeout(() => {
           if (currentRoom) {
             connectToSignalingServer(currentRoom.id);
           }
-        }, RECONNECT_DELAY_MS * reconnectAttempts);
+        }, backoffDelay);
       }
     };
   } catch (error) {
