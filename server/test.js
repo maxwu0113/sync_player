@@ -234,9 +234,9 @@ function joinRoom(ws, roomId, userId, username, roomUrls) {
     type: 'ROOM_JOINED', 
     roomId, 
     peerCount: roomClients.size, 
-    users,
     isHost, 
-    hostUrl: hostUrl || null 
+    hostUrl: hostUrl || null,
+    users
   }));
   
   broadcastToRoom(roomId, { type: 'PEER_JOINED', peerCount: roomClients.size, users }, ws);
