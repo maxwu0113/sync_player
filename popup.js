@@ -87,8 +87,8 @@ async function joinRoom() {
     return;
   }
 
-  if (roomId.length < 4) {
-    showStatus('Room ID must be at least 4 characters', 'error');
+  if (roomId.length < 6) {
+    showStatus('Room ID must be 6 characters', 'error');
     roomIdInput.focus();
     return;
   }

@@ -9,6 +9,8 @@ let isSyncing = false;
 let monitoredVideo = null;
 // Debounce timer for seeking
 let seekDebounceTimer = null;
+// Seek threshold in seconds - only sync if difference exceeds this value
+const SEEK_THRESHOLD_SECONDS = 1;
 
 /**
  * Find the primary video element on the page
@@ -73,8 +75,8 @@ function applyVideoState(video, state) {
       targetTime += latency;
     }
 
-    // Only seek if difference is significant (more than 1 second)
-    if (Math.abs(video.currentTime - targetTime) > 1) {
+    // Only seek if difference is significant (more than threshold)
+    if (Math.abs(video.currentTime - targetTime) > SEEK_THRESHOLD_SECONDS) {
       video.currentTime = targetTime;
     }
 
@@ -320,7 +322,9 @@ function observeForVideos() {
     });
   });
 
-  observer.observe(document.body, {
+  // Observe document.documentElement as fallback if body is not available
+  const targetNode = document.body || document.documentElement;
+  observer.observe(targetNode, {
     childList: true,
     subtree: true
   });

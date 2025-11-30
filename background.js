@@ -11,11 +11,17 @@ let connectedPeers = new Map();
 let wsConnection = null;
 
 /**
- * Generate a unique room ID
- * @returns {string} A random room ID
+ * Generate a unique room ID using cryptographically secure random values
+ * @returns {string} A random 6-character room ID
  */
 function generateRoomId() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
+  const array = new Uint8Array(4);
+  crypto.getRandomValues(array);
+  return Array.from(array)
+    .map(b => b.toString(36))
+    .join('')
+    .substring(0, 6)
+    .toUpperCase();
 }
 
 /**
