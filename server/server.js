@@ -30,7 +30,7 @@ const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 
 // Store client info
-// Map<WebSocket, { roomId: string }>
+// Map<WebSocket, { roomId: string, userId: string, username: string }>
 const clients = new Map();
 
 /**
@@ -70,11 +70,35 @@ function broadcastToRoom(roomId, message, excludeClient = null) {
 }
 
 /**
+ * Get the list of users in a room
+ * @param {string} roomId - The room ID
+ * @returns {Array} List of users with id and name
+ */
+function getRoomUsers(roomId) {
+  const roomClients = rooms.get(roomId);
+  if (!roomClients) return [];
+  
+  const users = [];
+  roomClients.forEach((client) => {
+    const clientInfo = clients.get(client);
+    if (clientInfo) {
+      users.push({
+        id: clientInfo.userId || 'unknown',
+        name: clientInfo.username || 'Anonymous'
+      });
+    }
+  });
+  return users;
+}
+
+/**
  * Handle a client joining a room
  * @param {WebSocket} ws - The WebSocket client
  * @param {string} roomId - The room ID to join
+ * @param {string} userId - The user's ID
+ * @param {string} username - The user's display name
  */
-function handleJoinRoom(ws, roomId) {
+function handleJoinRoom(ws, roomId, userId, username) {
   // Leave any existing room first
   const clientInfo = clients.get(ws);
   if (clientInfo && clientInfo.roomId) {
@@ -90,23 +114,32 @@ function handleJoinRoom(ws, roomId) {
   const roomClients = rooms.get(roomId);
   roomClients.add(ws);
 
-  // Update client info
-  clients.set(ws, { roomId });
+  // Update client info with user details
+  clients.set(ws, { 
+    roomId, 
+    userId: userId || generateClientId(),
+    username: username || 'Anonymous'
+  });
+
+  // Get the updated users list
+  const users = getRoomUsers(roomId);
 
   // Notify the client they joined
   sendMessage(ws, {
     type: 'ROOM_JOINED',
     roomId: roomId,
-    peerCount: roomClients.size
+    peerCount: roomClients.size,
+    users: users
   });
 
   // Notify other clients in the room
   broadcastToRoom(roomId, {
     type: 'PEER_JOINED',
-    peerCount: roomClients.size
+    peerCount: roomClients.size,
+    users: users
   }, ws);
 
-  console.log(`Client joined room ${roomId}. Room now has ${roomClients.size} clients.`);
+  console.log(`Client ${username || 'Anonymous'} (${userId}) joined room ${roomId}. Room now has ${roomClients.size} clients.`);
 }
 
 /**
@@ -119,6 +152,10 @@ function handleLeaveRoom(ws, roomId, notifyClient = true) {
   const roomClients = rooms.get(roomId);
   if (!roomClients) return;
 
+  // Get username for logging before removing
+  const clientInfo = clients.get(ws);
+  const username = clientInfo ? clientInfo.username : 'Unknown';
+
   // Remove client from room
   roomClients.delete(ws);
 
@@ -127,15 +164,18 @@ function handleLeaveRoom(ws, roomId, notifyClient = true) {
     rooms.delete(roomId);
     console.log(`Room ${roomId} deleted (empty).`);
   } else {
+    // Get the updated users list
+    const users = getRoomUsers(roomId);
+    
     // Notify remaining clients
     broadcastToRoom(roomId, {
       type: 'PEER_LEFT',
-      peerCount: roomClients.size
+      peerCount: roomClients.size,
+      users: users
     });
   }
 
-  // Clear client's room association
-  const clientInfo = clients.get(ws);
+  // Clear client's room association but keep userId and username
   if (clientInfo) {
     clientInfo.roomId = null;
   }
@@ -147,7 +187,7 @@ function handleLeaveRoom(ws, roomId, notifyClient = true) {
     });
   }
 
-  console.log(`Client left room ${roomId}. Room now has ${roomClients ? roomClients.size : 0} clients.`);
+  console.log(`Client ${username} left room ${roomId}. Room now has ${roomClients ? roomClients.size : 0} clients.`);
 }
 
 /**
@@ -188,7 +228,7 @@ function handleMessage(ws, data) {
     switch (message.type) {
       case 'JOIN_ROOM':
         if (message.roomId) {
-          handleJoinRoom(ws, message.roomId);
+          handleJoinRoom(ws, message.roomId, message.userId, message.username);
         } else {
           sendMessage(ws, { type: 'ERROR', error: 'Room ID is required' });
         }
@@ -239,7 +279,7 @@ wss.on('connection', (ws) => {
   console.log('New client connected.');
   
   // Initialize client info
-  clients.set(ws, { roomId: null });
+  clients.set(ws, { roomId: null, userId: null, username: null });
 
   // Send welcome message
   sendMessage(ws, { type: 'CONNECTED' });

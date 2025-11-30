@@ -8,6 +8,11 @@
 let currentRoom = null;
 // Store connected peers
 let connectedPeers = new Map();
+// Store users list in the room
+let roomUsers = [];
+// Current user's ID and name
+let currentUserId = null;
+let currentUsername = 'Anonymous';
 // WebSocket connection for real-time sync
 let wsConnection = null;
 // Reconnection settings
@@ -35,6 +40,19 @@ function generateRoomId() {
 }
 
 /**
+ * Generate a unique user ID using cryptographically secure random values
+ * @returns {string} A random 8-character user ID
+ */
+function generateUserId() {
+  const array = new Uint8Array(6);
+  crypto.getRandomValues(array);
+  return Array.from(array)
+    .map(b => b.toString(36).padStart(2, '0'))
+    .join('')
+    .substring(0, 8);
+}
+
+/**
  * Connect to the signaling server for cross-device sync
  * @param {string} roomId - The room ID to join
  */
@@ -43,7 +61,9 @@ function connectToSignalingServer(roomId) {
     // Already connected, just join the room
     wsConnection.send(JSON.stringify({
       type: 'JOIN_ROOM',
-      roomId: roomId
+      roomId: roomId,
+      userId: currentUserId,
+      username: currentUsername
     }));
     return;
   }
@@ -55,10 +75,12 @@ function connectToSignalingServer(roomId) {
       console.log('Sync Player: Connected to signaling server');
       reconnectAttempts = 0;
       
-      // Join the room
+      // Join the room with user info
       wsConnection.send(JSON.stringify({
         type: 'JOIN_ROOM',
-        roomId: roomId
+        roomId: roomId,
+        userId: currentUserId,
+        username: currentUsername
       }));
 
       // Notify all tabs about connection status
@@ -132,6 +154,10 @@ function handleSignalingMessage(message) {
       if (currentRoom) {
         currentRoom.peerCount = message.peerCount;
       }
+      // Update users list if provided
+      if (message.users) {
+        roomUsers = message.users;
+      }
       break;
 
     case 'PEER_JOINED':
@@ -139,12 +165,27 @@ function handleSignalingMessage(message) {
       if (currentRoom) {
         currentRoom.peerCount = message.peerCount;
       }
+      // Update users list if provided
+      if (message.users) {
+        roomUsers = message.users;
+      }
       break;
 
     case 'PEER_LEFT':
       console.log('Sync Player: A peer left the room');
       if (currentRoom) {
         currentRoom.peerCount = message.peerCount;
+      }
+      // Update users list if provided
+      if (message.users) {
+        roomUsers = message.users;
+      }
+      break;
+
+    case 'USERS_UPDATE':
+      console.log('Sync Player: Users list updated');
+      if (message.users) {
+        roomUsers = message.users;
       }
       break;
 
@@ -251,11 +292,11 @@ function sendSyncStateToServer(state) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
     case 'CREATE_ROOM':
-      handleCreateRoom(sendResponse);
+      handleCreateRoom(message.username, sendResponse);
       return true;
 
     case 'JOIN_ROOM':
-      handleJoinRoom(message.roomId, sendResponse);
+      handleJoinRoom(message.roomId, message.username, sendResponse);
       return true;
 
     case 'LEAVE_ROOM':
@@ -265,7 +306,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'GET_ROOM_STATUS':
       sendResponse({ 
         room: currentRoom,
-        connected: wsConnection && wsConnection.readyState === WebSocket.OPEN
+        connected: wsConnection && wsConnection.readyState === WebSocket.OPEN,
+        users: roomUsers,
+        userId: currentUserId
       });
       return true;
 
@@ -287,10 +330,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 /**
  * Create a new synchronization room
+ * @param {string} username - The user's display name
  * @param {function} sendResponse - Callback to send response
  */
-function handleCreateRoom(sendResponse) {
+function handleCreateRoom(username, sendResponse) {
   const roomId = generateRoomId();
+  currentUserId = generateUserId();
+  currentUsername = username || 'Anonymous';
+  
+  // Initialize users list with current user
+  roomUsers = [{ id: currentUserId, name: currentUsername }];
+  
   currentRoom = {
     id: roomId,
     isHost: true,
@@ -303,21 +353,33 @@ function handleCreateRoom(sendResponse) {
   connectToSignalingServer(roomId);
   
   // Store room info in chrome storage
-  chrome.storage.local.set({ currentRoom }, () => {
-    sendResponse({ success: true, roomId });
+  chrome.storage.local.set({ currentRoom, currentUserId, currentUsername }, () => {
+    sendResponse({ 
+      success: true, 
+      roomId, 
+      userId: currentUserId,
+      users: roomUsers
+    });
   });
 }
 
 /**
  * Join an existing synchronization room
  * @param {string} roomId - The room ID to join
+ * @param {string} username - The user's display name
  * @param {function} sendResponse - Callback to send response
  */
-function handleJoinRoom(roomId, sendResponse) {
+function handleJoinRoom(roomId, username, sendResponse) {
   if (!roomId) {
     sendResponse({ success: false, error: 'Room ID is required' });
     return;
   }
+
+  currentUserId = generateUserId();
+  currentUsername = username || 'Anonymous';
+  
+  // Initialize users list with current user (will be updated by server)
+  roomUsers = [{ id: currentUserId, name: currentUsername }];
 
   currentRoom = {
     id: roomId.toUpperCase(),
@@ -331,8 +393,13 @@ function handleJoinRoom(roomId, sendResponse) {
   connectToSignalingServer(currentRoom.id);
 
   // Store room info in chrome storage
-  chrome.storage.local.set({ currentRoom }, () => {
-    sendResponse({ success: true, roomId: currentRoom.id });
+  chrome.storage.local.set({ currentRoom, currentUserId, currentUsername }, () => {
+    sendResponse({ 
+      success: true, 
+      roomId: currentRoom.id,
+      userId: currentUserId,
+      users: roomUsers
+    });
   });
 }
 
@@ -345,7 +412,10 @@ function handleLeaveRoom(sendResponse) {
   disconnectFromSignalingServer();
   
   currentRoom = null;
-  chrome.storage.local.remove('currentRoom', () => {
+  roomUsers = [];
+  currentUserId = null;
+  
+  chrome.storage.local.remove(['currentRoom', 'currentUserId'], () => {
     sendResponse({ success: true });
   });
 }
@@ -406,9 +476,13 @@ function broadcastVideoEvent(event, senderTabId) {
  * Initialize extension state on startup
  */
 chrome.runtime.onStartup.addListener(() => {
-  chrome.storage.local.get('currentRoom', (result) => {
+  chrome.storage.local.get(['currentRoom', 'currentUserId', 'currentUsername'], (result) => {
     if (result.currentRoom) {
       currentRoom = result.currentRoom;
+      currentUserId = result.currentUserId || generateUserId();
+      currentUsername = result.currentUsername || 'Anonymous';
+      roomUsers = [{ id: currentUserId, name: currentUsername }];
+      
       // Reconnect to signaling server for the existing room
       reconnectAttempts = 0;
       connectToSignalingServer(currentRoom.id);

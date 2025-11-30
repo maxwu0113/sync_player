@@ -112,7 +112,7 @@ function startServer() {
     wss = new WebSocket.Server({ server: httpServer });
 
     wss.on('connection', (ws) => {
-      clients.set(ws, { roomId: null });
+      clients.set(ws, { roomId: null, userId: null, username: null });
       ws.send(JSON.stringify({ type: 'CONNECTED' }));
 
       ws.on('message', (data) => {
@@ -144,7 +144,7 @@ function handleMessage(ws, message) {
   switch (message.type) {
     case 'JOIN_ROOM':
       if (message.roomId) {
-        joinRoom(ws, message.roomId);
+        joinRoom(ws, message.roomId, message.userId, message.username);
       } else {
         ws.send(JSON.stringify({ type: 'ERROR', error: 'Room ID is required' }));
       }
@@ -169,7 +169,7 @@ function handleMessage(ws, message) {
   }
 }
 
-function joinRoom(ws, roomId) {
+function joinRoom(ws, roomId, userId, username) {
   const clientInfo = clients.get(ws);
   if (clientInfo && clientInfo.roomId) {
     leaveRoom(ws, clientInfo.roomId, false);
@@ -181,10 +181,28 @@ function joinRoom(ws, roomId) {
 
   const roomClients = rooms.get(roomId);
   roomClients.add(ws);
-  clients.set(ws, { roomId });
+  clients.set(ws, { roomId, userId: userId || 'test-user', username: username || 'Anonymous' });
 
-  ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId, peerCount: roomClients.size }));
-  broadcastToRoom(roomId, { type: 'PEER_JOINED', peerCount: roomClients.size }, ws);
+  const users = getRoomUsers(roomId);
+  ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId, peerCount: roomClients.size, users }));
+  broadcastToRoom(roomId, { type: 'PEER_JOINED', peerCount: roomClients.size, users }, ws);
+}
+
+function getRoomUsers(roomId) {
+  const roomClients = rooms.get(roomId);
+  if (!roomClients) return [];
+  
+  const users = [];
+  roomClients.forEach((client) => {
+    const clientInfo = clients.get(client);
+    if (clientInfo) {
+      users.push({
+        id: clientInfo.userId || 'unknown',
+        name: clientInfo.username || 'Anonymous'
+      });
+    }
+  });
+  return users;
 }
 
 function leaveRoom(ws, roomId, notifyClient = true) {
@@ -196,7 +214,8 @@ function leaveRoom(ws, roomId, notifyClient = true) {
   if (roomClients.size === 0) {
     rooms.delete(roomId);
   } else {
-    broadcastToRoom(roomId, { type: 'PEER_LEFT', peerCount: roomClients.size });
+    const users = getRoomUsers(roomId);
+    broadcastToRoom(roomId, { type: 'PEER_LEFT', peerCount: roomClients.size, users });
   }
 
   const clientInfo = clients.get(ws);
@@ -333,9 +352,49 @@ async function runTests() {
     console.log('✓ Server sends ERROR for invalid requests');
     passed++;
 
+    // Test 9: Users list with usernames
+    console.log('\nTest 9: Users list with usernames');
+    const roomId2 = 'TEST02';
+    const { ws: client3 } = await createClient();
+    const { ws: client4 } = await createClient();
+    
+    // Client 3 joins with username
+    const join3Response = await sendAndWait(client3, { 
+      type: 'JOIN_ROOM', 
+      roomId: roomId2,
+      userId: 'user1',
+      username: 'Alice'
+    }, 'ROOM_JOINED');
+    
+    assert.strictEqual(join3Response.users.length, 1);
+    assert.strictEqual(join3Response.users[0].name, 'Alice');
+    
+    // Client 4 joins with username
+    const peer3JoinPromise = waitForMessage(client3, 'PEER_JOINED');
+    const join4Response = await sendAndWait(client4, { 
+      type: 'JOIN_ROOM', 
+      roomId: roomId2,
+      userId: 'user2',
+      username: 'Bob'
+    }, 'ROOM_JOINED');
+    const peer3JoinMsg = await peer3JoinPromise;
+    
+    assert.strictEqual(join4Response.users.length, 2);
+    assert.strictEqual(peer3JoinMsg.users.length, 2);
+    
+    // Check that both users are in the list
+    const userNames = join4Response.users.map(u => u.name);
+    assert.ok(userNames.includes('Alice'), 'Alice should be in the users list');
+    assert.ok(userNames.includes('Bob'), 'Bob should be in the users list');
+    
+    console.log('✓ Users list is correctly populated with usernames');
+    passed++;
+
     // Cleanup
     client1.close();
     client2.close();
+    client3.close();
+    client4.close();
 
   } catch (error) {
     console.log('✗ Test failed:', error.message);
