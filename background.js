@@ -17,7 +17,7 @@ const RECONNECT_DELAY_MS = 2000;
 // Default signaling server URL
 // Users can host their own server using the code in /server directory
 // and change this URL to point to their server
-const DEFAULT_SIGNALING_SERVER = 'wss://sync-player-server.glitch.me';
+const DEFAULT_SIGNALING_SERVER = 'https://sync-player-ummm.onrender.com';
 let signalingServerUrl = DEFAULT_SIGNALING_SERVER;
 
 /**
