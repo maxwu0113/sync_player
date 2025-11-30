@@ -297,9 +297,12 @@ function handleRemoteVideoEvent(event) {
         if (Math.abs(monitoredVideo.currentTime - event.currentTime) > SEEK_THRESHOLD_SECONDS) {
           monitoredVideo.currentTime = event.currentTime;
           lastSyncedTime = event.currentTime;
-          if (!event.paused) {
-            monitoredVideo.play().catch(() => {});
-          }
+        }
+        // Ensure playback state is synced regardless of seek threshold
+        if (!event.paused && monitoredVideo.paused) {
+          monitoredVideo.play().catch(() => {});
+        } else if (event.paused && !monitoredVideo.paused) {
+          monitoredVideo.pause();
         }
         break;
 
