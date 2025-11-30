@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sync Player WebSocket Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            padding: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+        }
+
+        .section h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #dc3545;
+        }
+
+        .status-indicator.connected {
+            background: #28a745;
+        }
+
+        .log-container {
+            background: #1e1e1e;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            padding: 4px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-entry.sent {
+            color: #4fc3f7;
+        }
+
+        .log-entry.received {
+            color: #81c784;
+        }
+
+        .log-entry.error {
+            color: #e57373;
+        }
+
+        .log-entry.info {
+            color: #ffb74d;
+        }
+
+        .room-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px;
+            background: #e8f5e9;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .room-info.disconnected {
+            background: #ffebee;
+        }
+
+        .room-id {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            letter-spacing: 2px;
+        }
+
+        .peer-count {
+            color: #666;
+        }
+
+        .buttons-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 30px;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        footer a {
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Sync Player WebSocket Demo</h1>
+        <p class="subtitle">Test WebSocket server room functionality</p>
+
+        <!-- Connection Section -->
+        <div class="section">
+            <h2>1. Connect to Server</h2>
+            <div class="form-group">
+                <label for="serverUrl">Server URL:</label>
+                <input type="text" id="serverUrl" value="ws://localhost:8080" placeholder="ws://localhost:8080">
+            </div>
+            <div class="status">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span id="statusText">Disconnected</span>
+            </div>
+            <div class="buttons-row">
+                <button class="btn btn-primary" id="connectBtn" onclick="connect()">Connect</button>
+                <button class="btn btn-danger" id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+            </div>
+        </div>
+
+        <!-- Room Section -->
+        <div class="section">
+            <h2>2. Join a Room</h2>
+            <div class="room-info disconnected" id="roomInfo" style="display: none;">
+                <div>
+                    <span>Room ID:</span>
+                    <span class="room-id" id="currentRoomId">-</span>
+                </div>
+                <div class="peer-count" id="peerCount">0 peers</div>
+            </div>
+            <div class="form-group">
+                <label for="roomId">Room ID:</label>
+                <input type="text" id="roomId" placeholder="Enter room ID (e.g., ABC123)" maxlength="6">
+            </div>
+            <div class="buttons-row">
+                <button class="btn btn-primary" id="joinBtn" onclick="joinRoom()" disabled>Join Room</button>
+                <button class="btn btn-secondary" id="leaveBtn" onclick="leaveRoom()" disabled>Leave Room</button>
+            </div>
+        </div>
+
+        <!-- Test Messages Section -->
+        <div class="section">
+            <h2>3. Send Test Messages</h2>
+            <div class="buttons-row">
+                <button class="btn btn-primary" id="playBtn" onclick="sendPlayEvent()" disabled>Send Play Event</button>
+                <button class="btn btn-primary" id="pauseBtn" onclick="sendPauseEvent()" disabled>Send Pause Event</button>
+                <button class="btn btn-primary" id="seekBtn" onclick="sendSeekEvent()" disabled>Send Seek Event</button>
+                <button class="btn btn-secondary" id="syncBtn" onclick="sendSyncState()" disabled>Sync State</button>
+            </div>
+        </div>
+
+        <!-- Log Section -->
+        <div class="section">
+            <h2>Message Log</h2>
+            <div class="log-container" id="logContainer">
+                <div class="log-entry info">Click "Connect" to start...</div>
+            </div>
+            <button class="btn btn-secondary" onclick="clearLog()" style="margin-top: 15px;">Clear Log</button>
+        </div>
+    </div>
+
+    <footer>
+        <p>Open this page in multiple browser tabs to test room synchronization</p>
+        <p><a href="https://github.com/maxwu0113/sync_player">View on GitHub</a></p>
+    </footer>
+
+    <script>
+        let ws = null;
+        let currentRoom = null;
+
+        function log(message, type = 'info') {
+            const logContainer = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const time = new Date().toLocaleTimeString();
+            entry.textContent = `[${time}] ${message}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('logContainer').innerHTML = '<div class="log-entry info">Log cleared</div>';
+        }
+
+        function updateUI(connected) {
+            document.getElementById('statusIndicator').className = connected ? 'status-indicator connected' : 'status-indicator';
+            document.getElementById('statusText').textContent = connected ? 'Connected' : 'Disconnected';
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+            document.getElementById('joinBtn').disabled = !connected;
+            
+            const inRoom = connected && currentRoom;
+            document.getElementById('leaveBtn').disabled = !inRoom;
+            document.getElementById('playBtn').disabled = !inRoom;
+            document.getElementById('pauseBtn').disabled = !inRoom;
+            document.getElementById('seekBtn').disabled = !inRoom;
+            document.getElementById('syncBtn').disabled = !inRoom;
+            
+            const roomInfo = document.getElementById('roomInfo');
+            if (inRoom) {
+                roomInfo.style.display = 'flex';
+                roomInfo.className = 'room-info';
+            } else {
+                roomInfo.style.display = 'none';
+                roomInfo.className = 'room-info disconnected';
+            }
+        }
+
+        function connect() {
+            const url = document.getElementById('serverUrl').value;
+            log(`Connecting to ${url}...`, 'info');
+            
+            try {
+                ws = new WebSocket(url);
+                
+                ws.onopen = () => {
+                    log('WebSocket connection opened', 'info');
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        log(`← ${JSON.stringify(message)}`, 'received');
+                        handleMessage(message);
+                    } catch (e) {
+                        log(`← ${event.data}`, 'received');
+                    }
+                };
+                
+                ws.onclose = () => {
+                    log('WebSocket connection closed', 'info');
+                    currentRoom = null;
+                    updateUI(false);
+                };
+                
+                ws.onerror = (error) => {
+                    log(`WebSocket error: ${error.message || 'Unknown error'}`, 'error');
+                };
+            } catch (error) {
+                log(`Failed to connect: ${error.message}`, 'error');
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function handleMessage(message) {
+            switch (message.type) {
+                case 'CONNECTED':
+                    updateUI(true);
+                    break;
+                case 'ROOM_JOINED':
+                    currentRoom = message.roomId;
+                    document.getElementById('currentRoomId').textContent = message.roomId;
+                    document.getElementById('peerCount').textContent = `${message.peerCount} peer(s)`;
+                    updateUI(true);
+                    break;
+                case 'ROOM_LEFT':
+                    currentRoom = null;
+                    updateUI(true);
+                    break;
+                case 'PEER_JOINED':
+                case 'PEER_LEFT':
+                    document.getElementById('peerCount').textContent = `${message.peerCount} peer(s)`;
+                    break;
+                case 'VIDEO_EVENT':
+                    log(`Video event received: ${message.event.eventType}`, 'received');
+                    break;
+                case 'SYNC_VIDEO_STATE':
+                    log(`Sync state received: time=${message.state.currentTime}s`, 'received');
+                    break;
+                case 'ERROR':
+                    log(`Server error: ${message.error}`, 'error');
+                    break;
+            }
+        }
+
+        function send(message) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(message));
+                log(`→ ${JSON.stringify(message)}`, 'sent');
+            } else {
+                log('Not connected', 'error');
+            }
+        }
+
+        function joinRoom() {
+            const roomId = document.getElementById('roomId').value.trim().toUpperCase();
+            if (!roomId) {
+                log('Please enter a room ID', 'error');
+                return;
+            }
+            send({ type: 'JOIN_ROOM', roomId });
+        }
+
+        function leaveRoom() {
+            if (currentRoom) {
+                send({ type: 'LEAVE_ROOM', roomId: currentRoom });
+            }
+        }
+
+        function sendPlayEvent() {
+            if (currentRoom) {
+                send({
+                    type: 'VIDEO_EVENT',
+                    roomId: currentRoom,
+                    event: {
+                        eventType: 'play',
+                        currentTime: 10.5,
+                        playbackRate: 1.0,
+                        timestamp: Date.now()
+                    }
+                });
+            }
+        }
+
+        function sendPauseEvent() {
+            if (currentRoom) {
+                send({
+                    type: 'VIDEO_EVENT',
+                    roomId: currentRoom,
+                    event: {
+                        eventType: 'pause',
+                        currentTime: 15.0,
+                        timestamp: Date.now()
+                    }
+                });
+            }
+        }
+
+        function sendSeekEvent() {
+            if (currentRoom) {
+                send({
+                    type: 'VIDEO_EVENT',
+                    roomId: currentRoom,
+                    event: {
+                        eventType: 'seek',
+                        currentTime: 30.0,
+                        paused: false,
+                        timestamp: Date.now()
+                    }
+                });
+            }
+        }
+
+        function sendSyncState() {
+            if (currentRoom) {
+                send({
+                    type: 'SYNC_VIDEO_STATE',
+                    roomId: currentRoom,
+                    state: {
+                        currentTime: 45.0,
+                        paused: false,
+                        playbackRate: 1.5,
+                        timestamp: Date.now()
+                    }
+                });
+            }
+        }
+
+        // Auto-uppercase room ID input
+        document.getElementById('roomId').addEventListener('input', function() {
+            this.value = this.value.toUpperCase();
+        });
+
+        // Handle Enter key in room ID input
+        document.getElementById('roomId').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                joinRoom();
+            }
+        });
+    </script>
+</body>
+</html>

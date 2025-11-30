@@ -4,7 +4,8 @@
   "description": "WebSocket signaling server for Sync Player cross-device synchronization",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test.js"
   },
   "keywords": [
     "websocket",
