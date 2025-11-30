@@ -209,6 +209,31 @@ header h1 {
   gap: 8px;
 }
 
+/* Users info */
+.users-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.users-icon {
+  font-size: 16px;
+}
+
+.users-count {
+  font-size: 18px;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.users-label {
+  color: #666;
+  font-size: 13px;
+}
+
 .status-badge {
   display: inline-block;
   padding: 4px 12px;
