@@ -142,7 +142,7 @@ function handleJoinRoom(ws, roomId, userId, username) {
     roomId: roomId,
     peerCount: roomClients.size,
     isHost: isHost,
-    hostUrl: hostUrl || null
+    hostUrl: hostUrl || null,
     users: users
   });
 
