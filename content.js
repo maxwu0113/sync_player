@@ -14,7 +14,7 @@ const SEEK_THRESHOLD_SECONDS = 1;
 // Last synced time to track significant changes
 let lastSyncedTime = 0;
 // Sync cooldown period in milliseconds
-const SYNC_COOLDOWN_MS = 500;
+const SYNC_COOLDOWN_MS = 250;
 
 /**
  * Find the primary video element on the page
