@@ -278,8 +278,8 @@ function handleDisconnect(ws) {
 wss.on('connection', (ws) => {
   console.log('New client connected.');
   
-  // Initialize client info
-  clients.set(ws, { roomId: null });
+  // Initialize client info with isHost: false (will be set when joining a room)
+  clients.set(ws, { roomId: null, isHost: false });
 
   // Send welcome message
   sendMessage(ws, { type: 'CONNECTED' });

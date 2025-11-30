@@ -231,7 +231,13 @@ function sendCurrentUrlToServer() {
 
   // Get the active tab's URL
   chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-    if (tabs.length > 0 && tabs[0].url) {
+    // Handle potential chrome.runtime.lastError
+    if (chrome.runtime.lastError) {
+      console.error('Sync Player: Error querying tabs:', chrome.runtime.lastError.message);
+      return;
+    }
+    
+    if (tabs && tabs.length > 0 && tabs[0].url) {
       const url = tabs[0].url;
       // Only send if it's a valid http/https URL (not chrome:// or extension pages)
       if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -258,31 +264,60 @@ function openHostUrl(url) {
 
   // Check if we already have a tab with this URL
   chrome.tabs.query({}, (tabs) => {
-    const existingTab = tabs.find(tab => tab.url === url);
+    // Handle potential chrome.runtime.lastError
+    if (chrome.runtime.lastError) {
+      console.error('Sync Player: Error querying tabs:', chrome.runtime.lastError.message);
+      return;
+    }
+    
+    const existingTab = tabs && tabs.find(tab => tab.url === url);
     
     if (existingTab) {
       // If tab exists, focus on it
-      chrome.tabs.update(existingTab.id, { active: true });
-      console.log('Sync Player: Focused existing tab with host URL');
+      chrome.tabs.update(existingTab.id, { active: true }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Sync Player: Error focusing tab:', chrome.runtime.lastError.message);
+        } else {
+          console.log('Sync Player: Focused existing tab with host URL');
+        }
+      });
     } else {
       // Check if there's an active tab we should navigate
       chrome.tabs.query({ active: true, lastFocusedWindow: true }, (activeTabs) => {
-        if (activeTabs.length > 0) {
+        if (chrome.runtime.lastError) {
+          console.error('Sync Player: Error querying active tabs:', chrome.runtime.lastError.message);
+          return;
+        }
+        
+        if (activeTabs && activeTabs.length > 0) {
           const activeTab = activeTabs[0];
           // If the active tab is a video page (http/https), navigate it to the new URL
           if (activeTab.url && (activeTab.url.startsWith('http://') || activeTab.url.startsWith('https://'))) {
-            chrome.tabs.update(activeTab.id, { url: url });
-            console.log('Sync Player: Navigated current tab to host URL:', url);
+            chrome.tabs.update(activeTab.id, { url: url }, () => {
+              if (chrome.runtime.lastError) {
+                console.error('Sync Player: Error updating tab:', chrome.runtime.lastError.message);
+              } else {
+                console.log('Sync Player: Navigated current tab to host URL:', url);
+              }
+            });
           } else {
             // Otherwise open a new tab
-            chrome.tabs.create({ url: url, active: true }, (tab) => {
-              console.log('Sync Player: Opened host URL in new tab:', url);
+            chrome.tabs.create({ url: url, active: true }, () => {
+              if (chrome.runtime.lastError) {
+                console.error('Sync Player: Error creating tab:', chrome.runtime.lastError.message);
+              } else {
+                console.log('Sync Player: Opened host URL in new tab:', url);
+              }
             });
           }
         } else {
           // No active tab, create a new one
-          chrome.tabs.create({ url: url, active: true }, (tab) => {
-            console.log('Sync Player: Opened host URL in new tab:', url);
+          chrome.tabs.create({ url: url, active: true }, () => {
+            if (chrome.runtime.lastError) {
+              console.error('Sync Player: Error creating tab:', chrome.runtime.lastError.message);
+            } else {
+              console.log('Sync Player: Opened host URL in new tab:', url);
+            }
           });
         }
       });
@@ -538,7 +573,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (tab.url.startsWith('http://') || tab.url.startsWith('https://')) {
         // Check if this is the active tab in the last focused window
         chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-          if (tabs.length > 0 && tabs[0].id === tabId) {
+          // Handle potential chrome.runtime.lastError
+          if (chrome.runtime.lastError) {
+            console.error('Sync Player: Error querying active tabs:', chrome.runtime.lastError.message);
+            return;
+          }
+          
+          if (tabs && tabs.length > 0 && tabs[0].id === tabId) {
             // Send the new URL to the server
             sendCurrentUrlToServer();
             console.log('Sync Player: Host navigated to new page, broadcasting URL:', tab.url);
