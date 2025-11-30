@@ -11,6 +11,10 @@ let monitoredVideo = null;
 let seekDebounceTimer = null;
 // Seek threshold in seconds - only sync if difference exceeds this value
 const SEEK_THRESHOLD_SECONDS = 1;
+// Last synced time to track significant changes
+let lastSyncedTime = 0;
+// Sync cooldown period in milliseconds
+const SYNC_COOLDOWN_MS = 500;
 
 /**
  * Find the primary video element on the page
@@ -78,6 +82,7 @@ function applyVideoState(video, state) {
     // Only seek if difference is significant (more than threshold)
     if (Math.abs(video.currentTime - targetTime) > SEEK_THRESHOLD_SECONDS) {
       video.currentTime = targetTime;
+      lastSyncedTime = targetTime;
     }
 
     // Sync playback rate
@@ -95,10 +100,10 @@ function applyVideoState(video, state) {
       });
     }
   } finally {
-    // Reset sync flag after a short delay
+    // Reset sync flag after cooldown to prevent bounce-back effects
     setTimeout(() => {
       isSyncing = false;
-    }, 100);
+    }, SYNC_COOLDOWN_MS);
   }
 }
 
@@ -190,14 +195,18 @@ function handlePause() {
 function handleSeeked() {
   if (isSyncing || !monitoredVideo) return;
 
-  // Debounce seek events
+  // Debounce seek events with a longer delay to prevent stuttering
   clearTimeout(seekDebounceTimer);
   seekDebounceTimer = setTimeout(() => {
-    sendVideoEvent('seek', {
-      currentTime: monitoredVideo.currentTime,
-      paused: monitoredVideo.paused
-    });
-  }, 200);
+    // Only send seek event if the change is significant
+    if (Math.abs(monitoredVideo.currentTime - lastSyncedTime) > SEEK_THRESHOLD_SECONDS) {
+      lastSyncedTime = monitoredVideo.currentTime;
+      sendVideoEvent('seek', {
+        currentTime: monitoredVideo.currentTime,
+        paused: monitoredVideo.paused
+      });
+    }
+  }, 300);
 }
 
 /**
@@ -262,7 +271,12 @@ function handleRemoteVideoEvent(event) {
       case 'play':
         // Adjust time for network latency
         const playLatency = (Date.now() - event.timestamp) / 1000;
-        monitoredVideo.currentTime = event.currentTime + playLatency;
+        const targetPlayTime = event.currentTime + playLatency;
+        // Only seek if difference is significant
+        if (Math.abs(monitoredVideo.currentTime - targetPlayTime) > SEEK_THRESHOLD_SECONDS) {
+          monitoredVideo.currentTime = targetPlayTime;
+          lastSyncedTime = targetPlayTime;
+        }
         monitoredVideo.playbackRate = event.playbackRate;
         monitoredVideo.play().catch(() => {
           console.log('Sync Player: Autoplay blocked');
@@ -270,14 +284,25 @@ function handleRemoteVideoEvent(event) {
         break;
 
       case 'pause':
-        monitoredVideo.currentTime = event.currentTime;
+        // Only seek if difference is significant
+        if (Math.abs(monitoredVideo.currentTime - event.currentTime) > SEEK_THRESHOLD_SECONDS) {
+          monitoredVideo.currentTime = event.currentTime;
+          lastSyncedTime = event.currentTime;
+        }
         monitoredVideo.pause();
         break;
 
       case 'seek':
-        monitoredVideo.currentTime = event.currentTime;
-        if (!event.paused) {
+        // Only seek if difference is significant to prevent stuttering
+        if (Math.abs(monitoredVideo.currentTime - event.currentTime) > SEEK_THRESHOLD_SECONDS) {
+          monitoredVideo.currentTime = event.currentTime;
+          lastSyncedTime = event.currentTime;
+        }
+        // Ensure playback state is synced regardless of seek threshold
+        if (!event.paused && monitoredVideo.paused) {
           monitoredVideo.play().catch(() => {});
+        } else if (event.paused && !monitoredVideo.paused) {
+          monitoredVideo.pause();
         }
         break;
 
@@ -286,9 +311,10 @@ function handleRemoteVideoEvent(event) {
         break;
     }
   } finally {
+    // Reset sync flag after a longer delay to prevent bounce-back effects
     setTimeout(() => {
       isSyncing = false;
-    }, 100);
+    }, SYNC_COOLDOWN_MS);
   }
 }
 

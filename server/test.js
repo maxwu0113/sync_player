@@ -113,7 +113,7 @@ function startServer() {
     wss = new WebSocket.Server({ server: httpServer });
 
     wss.on('connection', (ws) => {
-      clients.set(ws, { roomId: null, isHost: false });
+      clients.set(ws, { roomId: null, userId: null, username: null, isHost: false });
       ws.send(JSON.stringify({ type: 'CONNECTED' }));
 
       ws.on('message', (data) => {
@@ -168,7 +168,7 @@ function handleMessage(ws, message, roomUrls) {
           ws.send(JSON.stringify({ type: 'ERROR', error: 'Invalid room ID format. Room ID must be 1-20 alphanumeric characters.' }));
           break;
         }
-        joinRoom(ws, message.roomId, roomUrls);
+        joinRoom(ws, message.roomId, message.userId, message.username, roomUrls);
       } else {
         ws.send(JSON.stringify({ type: 'ERROR', error: 'Room ID is required' }));
       }
@@ -206,7 +206,7 @@ function handleMessage(ws, message, roomUrls) {
   }
 }
 
-function joinRoom(ws, roomId, roomUrls) {
+function joinRoom(ws, roomId, userId, username, roomUrls) {
   const clientInfo = clients.get(ws);
   if (clientInfo && clientInfo.roomId) {
     leaveRoom(ws, clientInfo.roomId, false, roomUrls);
@@ -220,11 +220,43 @@ function joinRoom(ws, roomId, roomUrls) {
 
   const roomClients = rooms.get(roomId);
   roomClients.add(ws);
-  clients.set(ws, { roomId, isHost });
+  clients.set(ws, { 
+    roomId, 
+    isHost,
+    userId: userId || 'test-user', 
+    username: username || 'Anonymous' 
+  });
 
   const hostUrl = roomUrls.get(roomId);
-  ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId, peerCount: roomClients.size, isHost, hostUrl: hostUrl || null }));
-  broadcastToRoom(roomId, { type: 'PEER_JOINED', peerCount: roomClients.size }, ws);
+  const users = getRoomUsers(roomId);
+  
+  ws.send(JSON.stringify({ 
+    type: 'ROOM_JOINED', 
+    roomId, 
+    peerCount: roomClients.size, 
+    users,
+    isHost, 
+    hostUrl: hostUrl || null 
+  }));
+  
+  broadcastToRoom(roomId, { type: 'PEER_JOINED', peerCount: roomClients.size, users }, ws);
+}
+
+function getRoomUsers(roomId) {
+  const roomClients = rooms.get(roomId);
+  if (!roomClients) return [];
+  
+  const users = [];
+  roomClients.forEach((client) => {
+    const clientInfo = clients.get(client);
+    if (clientInfo) {
+      users.push({
+        id: clientInfo.userId || 'unknown',
+        name: clientInfo.username || 'Anonymous'
+      });
+    }
+  });
+  return users;
 }
 
 function leaveRoom(ws, roomId, notifyClient = true, roomUrls) {
@@ -239,7 +271,8 @@ function leaveRoom(ws, roomId, notifyClient = true, roomUrls) {
       roomUrls.delete(roomId);
     }
   } else {
-    broadcastToRoom(roomId, { type: 'PEER_LEFT', peerCount: roomClients.size });
+    const users = getRoomUsers(roomId);
+    broadcastToRoom(roomId, { type: 'PEER_LEFT', peerCount: roomClients.size, users });
   }
 
   const clientInfo = clients.get(ws);
@@ -377,8 +410,46 @@ async function runTests() {
     console.log('✓ Server sends ERROR for invalid requests');
     passed++;
 
-    // Test 9: Host URL sharing - host creates room and gets isHost=true
-    console.log('\nTest 9: Host URL sharing - first client is host');
+    // Test 9: Users list with usernames
+    console.log('\nTest 9: Users list with usernames');
+    const roomId2 = 'TEST02';
+    const { ws: client3 } = await createClient();
+    const { ws: client4 } = await createClient();
+    
+    // Client 3 joins with username
+    const join3Response = await sendAndWait(client3, { 
+      type: 'JOIN_ROOM', 
+      roomId: roomId2,
+      userId: 'user1',
+      username: 'Alice'
+    }, 'ROOM_JOINED');
+    
+    assert.strictEqual(join3Response.users.length, 1);
+    assert.strictEqual(join3Response.users[0].name, 'Alice');
+    
+    // Client 4 joins with username
+    const peer3JoinPromise = waitForMessage(client3, 'PEER_JOINED');
+    const join4Response = await sendAndWait(client4, { 
+      type: 'JOIN_ROOM', 
+      roomId: roomId2,
+      userId: 'user2',
+      username: 'Bob'
+    }, 'ROOM_JOINED');
+    const peer3JoinMsg = await peer3JoinPromise;
+    
+    assert.strictEqual(join4Response.users.length, 2);
+    assert.strictEqual(peer3JoinMsg.users.length, 2);
+    
+    // Check that both users are in the list
+    const userNames = join4Response.users.map(u => u.name);
+    assert.ok(userNames.includes('Alice'), 'Alice should be in the users list');
+    assert.ok(userNames.includes('Bob'), 'Bob should be in the users list');
+    
+    console.log('✓ Users list is correctly populated with usernames');
+    passed++;
+
+    // Test 10: Host URL sharing - host creates room and gets isHost=true
+    console.log('\nTest 10: Host URL sharing - first client is host');
     const { ws: host } = await createClient();
     const hostRoomId = 'HOST01';
     const hostJoinResponse = await sendAndWait(host, { type: 'JOIN_ROOM', roomId: hostRoomId }, 'ROOM_JOINED');
@@ -387,8 +458,8 @@ async function runTests() {
     console.log('✓ First client joining room becomes host');
     passed++;
 
-    // Test 10: Host can update their URL
-    console.log('\nTest 10: Host URL update');
+    // Test 11: Host can update their URL
+    console.log('\nTest 11: Host URL update');
     const testUrl = 'https://www.youtube.com/watch?v=test123';
     const { ws: guest } = await createClient();
     
@@ -404,8 +475,8 @@ async function runTests() {
     console.log('✓ Host can update URL and guests receive it');
     passed++;
 
-    // Test 11: Guest cannot update host URL
-    console.log('\nTest 11: Non-host cannot update URL');
+    // Test 12: Guest cannot update host URL
+    console.log('\nTest 12: Non-host cannot update URL');
     const fakeUrl = 'https://www.example.com/fake';
     // Guest tries to update URL - should not broadcast
     guest.send(JSON.stringify({ type: 'UPDATE_HOST_URL', roomId: hostRoomId, url: fakeUrl }));
@@ -415,8 +486,8 @@ async function runTests() {
     console.log('✓ Non-host cannot update URL (no broadcast)');
     passed++;
 
-    // Test 12: New guest receives host URL when joining
-    console.log('\nTest 12: New guest receives host URL on join');
+    // Test 13: New guest receives host URL when joining
+    console.log('\nTest 13: New guest receives host URL on join');
     const { ws: guest2 } = await createClient();
     const guest2JoinResponse = await sendAndWait(guest2, { type: 'JOIN_ROOM', roomId: hostRoomId }, 'ROOM_JOINED');
     
@@ -425,8 +496,8 @@ async function runTests() {
     console.log('✓ New guest receives host URL when joining');
     passed++;
 
-    // Test 13: Security - Invalid URL rejected
-    console.log('\nTest 13: Security - Invalid URL rejected');
+    // Test 14: Security - Invalid URL rejected
+    console.log('\nTest 14: Security - Invalid URL rejected');
     const { ws: secHost } = await createClient();
     const secRoomId = 'SEC001';
     await sendAndWait(secHost, { type: 'JOIN_ROOM', roomId: secRoomId }, 'ROOM_JOINED');
@@ -440,8 +511,8 @@ async function runTests() {
     console.log('✓ Malicious javascript: URL rejected');
     passed++;
 
-    // Test 14: Security - Invalid room ID rejected
-    console.log('\nTest 14: Security - Invalid room ID rejected');
+    // Test 15: Security - Invalid room ID rejected
+    console.log('\nTest 15: Security - Invalid room ID rejected');
     const { ws: secClient } = await createClient();
     const invalidRoomErrorPromise = waitForMessage(secClient, 'ERROR');
     secClient.send(JSON.stringify({ type: 'JOIN_ROOM', roomId: '../../../etc/passwd' }));
@@ -458,6 +529,8 @@ async function runTests() {
     guest2.close();
     secHost.close();
     secClient.close();
+    client3.close();
+    client4.close();
 
   } catch (error) {
     console.log('✗ Test failed:', error.message);
