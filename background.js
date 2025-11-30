@@ -47,7 +47,7 @@ function generateUserId() {
   const array = new Uint8Array(6);
   crypto.getRandomValues(array);
   return Array.from(array)
-    .map(b => b.toString(36))
+    .map(b => b.toString(36).padStart(2, '0'))
     .join('')
     .substring(0, 8);
 }

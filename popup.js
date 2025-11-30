@@ -83,25 +83,36 @@ function updateConnectionStatus(connected) {
  * @param {Array} users - List of users in the room
  */
 function updateUsersList(users) {
-  // Update user count
-  const count = users.length || 1;
-  userCountDisplay.textContent = count;
-  
   // Clear existing list
   usersList.innerHTML = '';
   
-  // If no users provided, show at least current user
+  // If no users provided, show at least current user as placeholder
   if (!users || users.length === 0) {
+    userCountDisplay.textContent = '1';
     const li = document.createElement('li');
     li.className = 'current-user';
-    li.innerHTML = `
-      <span class="user-icon">👤</span>
-      <span class="user-name">You</span>
-      <span class="you-badge">You</span>
-    `;
+    
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'user-icon';
+    iconSpan.textContent = '👤';
+    
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'user-name';
+    nameSpan.textContent = 'You';
+    
+    const badgeSpan = document.createElement('span');
+    badgeSpan.className = 'you-badge';
+    badgeSpan.textContent = 'You';
+    
+    li.appendChild(iconSpan);
+    li.appendChild(nameSpan);
+    li.appendChild(badgeSpan);
     usersList.appendChild(li);
     return;
   }
+  
+  // Update user count
+  userCountDisplay.textContent = users.length;
   
   // Add each user to the list
   users.forEach(user => {
@@ -112,27 +123,26 @@ function updateUsersList(users) {
       li.className = 'current-user';
     }
     
-    const displayName = user.name || 'Anonymous';
-    const escapedName = escapeHtml(displayName);
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'user-icon';
+    iconSpan.textContent = '👤';
     
-    li.innerHTML = `
-      <span class="user-icon">👤</span>
-      <span class="user-name">${escapedName}</span>
-      ${isCurrentUser ? '<span class="you-badge">You</span>' : ''}
-    `;
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'user-name';
+    nameSpan.textContent = user.name || 'Anonymous';
+    
+    li.appendChild(iconSpan);
+    li.appendChild(nameSpan);
+    
+    if (isCurrentUser) {
+      const badgeSpan = document.createElement('span');
+      badgeSpan.className = 'you-badge';
+      badgeSpan.textContent = 'You';
+      li.appendChild(badgeSpan);
+    }
+    
     usersList.appendChild(li);
   });
-}
-
-/**
- * Escape HTML to prevent XSS
- * @param {string} text - Text to escape
- * @returns {string} Escaped text
- */
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
 }
 
 /**
