@@ -191,6 +191,38 @@ function handleSyncVideoState(ws, roomId, state) {
 }
 
 /**
+ * Validate that a URL is safe (http or https only)
+ * @param {string} url - The URL to validate
+ * @returns {boolean} True if the URL is safe
+ */
+function isValidUrl(url) {
+  if (!url || typeof url !== 'string') {
+    return false;
+  }
+  
+  // Only allow http and https protocols
+  try {
+    const parsedUrl = new URL(url);
+    return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Validate room ID format (alphanumeric, 6 characters)
+ * @param {string} roomId - The room ID to validate
+ * @returns {boolean} True if the room ID is valid
+ */
+function isValidRoomId(roomId) {
+  if (!roomId || typeof roomId !== 'string') {
+    return false;
+  }
+  // Allow alphanumeric room IDs between 1-20 characters
+  return /^[A-Za-z0-9]{1,20}$/.test(roomId);
+}
+
+/**
  * Handle host URL update from a client
  * @param {WebSocket} ws - The WebSocket client
  * @param {string} roomId - The room ID
@@ -200,6 +232,13 @@ function handleUpdateHostUrl(ws, roomId, url) {
   const clientInfo = clients.get(ws);
   // Only allow host to update URL
   if (clientInfo && clientInfo.isHost) {
+    // Validate URL before storing and broadcasting
+    if (!isValidUrl(url)) {
+      console.log(`Invalid URL rejected for room ${roomId}: ${url}`);
+      sendMessage(ws, { type: 'ERROR', error: 'Invalid URL format. Only http and https URLs are allowed.' });
+      return;
+    }
+    
     roomUrls.set(roomId, url);
     // Broadcast the URL to all other clients in the room
     broadcastToRoom(roomId, {
@@ -222,6 +261,11 @@ function handleMessage(ws, data) {
     switch (message.type) {
       case 'JOIN_ROOM':
         if (message.roomId) {
+          // Validate room ID format
+          if (!isValidRoomId(message.roomId)) {
+            sendMessage(ws, { type: 'ERROR', error: 'Invalid room ID format. Room ID must be 1-20 alphanumeric characters.' });
+            break;
+          }
           handleJoinRoom(ws, message.roomId);
         } else {
           sendMessage(ws, { type: 'ERROR', error: 'Room ID is required' });

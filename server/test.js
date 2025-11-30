@@ -141,10 +141,33 @@ function startServer() {
   });
 }
 
+function isValidUrl(url) {
+  if (!url || typeof url !== 'string') {
+    return false;
+  }
+  try {
+    const parsedUrl = new URL(url);
+    return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
+  } catch (e) {
+    return false;
+  }
+}
+
+function isValidRoomId(roomId) {
+  if (!roomId || typeof roomId !== 'string') {
+    return false;
+  }
+  return /^[A-Za-z0-9]{1,20}$/.test(roomId);
+}
+
 function handleMessage(ws, message, roomUrls) {
   switch (message.type) {
     case 'JOIN_ROOM':
       if (message.roomId) {
+        if (!isValidRoomId(message.roomId)) {
+          ws.send(JSON.stringify({ type: 'ERROR', error: 'Invalid room ID format. Room ID must be 1-20 alphanumeric characters.' }));
+          break;
+        }
         joinRoom(ws, message.roomId, roomUrls);
       } else {
         ws.send(JSON.stringify({ type: 'ERROR', error: 'Room ID is required' }));
@@ -169,6 +192,10 @@ function handleMessage(ws, message, roomUrls) {
       if (message.roomId && message.url) {
         const clientInfo = clients.get(ws);
         if (clientInfo && clientInfo.isHost) {
+          if (!isValidUrl(message.url)) {
+            ws.send(JSON.stringify({ type: 'ERROR', error: 'Invalid URL format. Only http and https URLs are allowed.' }));
+            break;
+          }
           roomUrls.set(message.roomId, message.url);
           broadcastToRoom(message.roomId, { type: 'HOST_URL_UPDATED', url: message.url }, ws);
         }
@@ -398,12 +425,39 @@ async function runTests() {
     console.log('✓ New guest receives host URL when joining');
     passed++;
 
+    // Test 13: Security - Invalid URL rejected
+    console.log('\nTest 13: Security - Invalid URL rejected');
+    const { ws: secHost } = await createClient();
+    const secRoomId = 'SEC001';
+    await sendAndWait(secHost, { type: 'JOIN_ROOM', roomId: secRoomId }, 'ROOM_JOINED');
+    
+    // Try to set a javascript: URL (should be rejected)
+    const maliciousUrl = 'javascript:alert(1)';
+    const errorPromise = waitForMessage(secHost, 'ERROR');
+    secHost.send(JSON.stringify({ type: 'UPDATE_HOST_URL', roomId: secRoomId, url: maliciousUrl }));
+    const errorMsg = await errorPromise;
+    assert.strictEqual(errorMsg.type, 'ERROR');
+    console.log('✓ Malicious javascript: URL rejected');
+    passed++;
+
+    // Test 14: Security - Invalid room ID rejected
+    console.log('\nTest 14: Security - Invalid room ID rejected');
+    const { ws: secClient } = await createClient();
+    const invalidRoomErrorPromise = waitForMessage(secClient, 'ERROR');
+    secClient.send(JSON.stringify({ type: 'JOIN_ROOM', roomId: '../../../etc/passwd' }));
+    const invalidRoomError = await invalidRoomErrorPromise;
+    assert.strictEqual(invalidRoomError.type, 'ERROR');
+    console.log('✓ Invalid room ID rejected');
+    passed++;
+
     // Cleanup
     client1.close();
     client2.close();
     host.close();
     guest.close();
     guest2.close();
+    secHost.close();
+    secClient.close();
 
   } catch (error) {
     console.log('✗ Test failed:', error.message);
