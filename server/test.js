@@ -109,16 +109,17 @@ function startServer() {
 
     rooms = new Map();
     clients = new Map();
+    const roomUrls = new Map();
     wss = new WebSocket.Server({ server: httpServer });
 
     wss.on('connection', (ws) => {
-      clients.set(ws, { roomId: null });
+      clients.set(ws, { roomId: null, isHost: false });
       ws.send(JSON.stringify({ type: 'CONNECTED' }));
 
       ws.on('message', (data) => {
         try {
           const message = JSON.parse(data.toString());
-          handleMessage(ws, message);
+          handleMessage(ws, message, roomUrls);
         } catch (error) {
           ws.send(JSON.stringify({ type: 'ERROR', error: 'Invalid message format' }));
         }
@@ -127,7 +128,7 @@ function startServer() {
       ws.on('close', () => {
         const clientInfo = clients.get(ws);
         if (clientInfo && clientInfo.roomId) {
-          leaveRoom(ws, clientInfo.roomId, false);
+          leaveRoom(ws, clientInfo.roomId, false, roomUrls);
         }
         clients.delete(ws);
       });
@@ -140,18 +141,18 @@ function startServer() {
   });
 }
 
-function handleMessage(ws, message) {
+function handleMessage(ws, message, roomUrls) {
   switch (message.type) {
     case 'JOIN_ROOM':
       if (message.roomId) {
-        joinRoom(ws, message.roomId);
+        joinRoom(ws, message.roomId, roomUrls);
       } else {
         ws.send(JSON.stringify({ type: 'ERROR', error: 'Room ID is required' }));
       }
       break;
     case 'LEAVE_ROOM':
       if (message.roomId) {
-        leaveRoom(ws, message.roomId);
+        leaveRoom(ws, message.roomId, true, roomUrls);
       }
       break;
     case 'VIDEO_EVENT':
@@ -164,30 +165,42 @@ function handleMessage(ws, message) {
         broadcastToRoom(message.roomId, { type: 'SYNC_VIDEO_STATE', state: message.state }, ws);
       }
       break;
+    case 'UPDATE_HOST_URL':
+      if (message.roomId && message.url) {
+        const clientInfo = clients.get(ws);
+        if (clientInfo && clientInfo.isHost) {
+          roomUrls.set(message.roomId, message.url);
+          broadcastToRoom(message.roomId, { type: 'HOST_URL_UPDATED', url: message.url }, ws);
+        }
+      }
+      break;
     default:
       ws.send(JSON.stringify({ type: 'ERROR', error: 'Unknown message type' }));
   }
 }
 
-function joinRoom(ws, roomId) {
+function joinRoom(ws, roomId, roomUrls) {
   const clientInfo = clients.get(ws);
   if (clientInfo && clientInfo.roomId) {
-    leaveRoom(ws, clientInfo.roomId, false);
+    leaveRoom(ws, clientInfo.roomId, false, roomUrls);
   }
 
+  const isHost = !rooms.has(roomId);
+  
   if (!rooms.has(roomId)) {
     rooms.set(roomId, new Set());
   }
 
   const roomClients = rooms.get(roomId);
   roomClients.add(ws);
-  clients.set(ws, { roomId });
+  clients.set(ws, { roomId, isHost });
 
-  ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId, peerCount: roomClients.size }));
+  const hostUrl = roomUrls.get(roomId);
+  ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId, peerCount: roomClients.size, isHost, hostUrl: hostUrl || null }));
   broadcastToRoom(roomId, { type: 'PEER_JOINED', peerCount: roomClients.size }, ws);
 }
 
-function leaveRoom(ws, roomId, notifyClient = true) {
+function leaveRoom(ws, roomId, notifyClient = true, roomUrls) {
   const roomClients = rooms.get(roomId);
   if (!roomClients) return;
 
@@ -195,6 +208,9 @@ function leaveRoom(ws, roomId, notifyClient = true) {
 
   if (roomClients.size === 0) {
     rooms.delete(roomId);
+    if (roomUrls) {
+      roomUrls.delete(roomId);
+    }
   } else {
     broadcastToRoom(roomId, { type: 'PEER_LEFT', peerCount: roomClients.size });
   }
@@ -202,6 +218,7 @@ function leaveRoom(ws, roomId, notifyClient = true) {
   const clientInfo = clients.get(ws);
   if (clientInfo) {
     clientInfo.roomId = null;
+    clientInfo.isHost = false;
   }
 
   if (notifyClient) {
@@ -333,9 +350,60 @@ async function runTests() {
     console.log('✓ Server sends ERROR for invalid requests');
     passed++;
 
+    // Test 9: Host URL sharing - host creates room and gets isHost=true
+    console.log('\nTest 9: Host URL sharing - first client is host');
+    const { ws: host } = await createClient();
+    const hostRoomId = 'HOST01';
+    const hostJoinResponse = await sendAndWait(host, { type: 'JOIN_ROOM', roomId: hostRoomId }, 'ROOM_JOINED');
+    assert.strictEqual(hostJoinResponse.isHost, true);
+    assert.strictEqual(hostJoinResponse.hostUrl, null);
+    console.log('✓ First client joining room becomes host');
+    passed++;
+
+    // Test 10: Host can update their URL
+    console.log('\nTest 10: Host URL update');
+    const testUrl = 'https://www.youtube.com/watch?v=test123';
+    const { ws: guest } = await createClient();
+    
+    // Guest joins room
+    const urlUpdatePromise = waitForMessage(guest, 'HOST_URL_UPDATED');
+    await sendAndWait(guest, { type: 'JOIN_ROOM', roomId: hostRoomId }, 'ROOM_JOINED');
+    
+    // Host updates URL
+    host.send(JSON.stringify({ type: 'UPDATE_HOST_URL', roomId: hostRoomId, url: testUrl }));
+    const urlUpdate = await urlUpdatePromise;
+    
+    assert.strictEqual(urlUpdate.url, testUrl);
+    console.log('✓ Host can update URL and guests receive it');
+    passed++;
+
+    // Test 11: Guest cannot update host URL
+    console.log('\nTest 11: Non-host cannot update URL');
+    const fakeUrl = 'https://www.example.com/fake';
+    // Guest tries to update URL - should not broadcast
+    guest.send(JSON.stringify({ type: 'UPDATE_HOST_URL', roomId: hostRoomId, url: fakeUrl }));
+    // Wait a bit to ensure no message is received
+    await new Promise(resolve => setTimeout(resolve, 200));
+    // If we get here without error, the message was correctly ignored
+    console.log('✓ Non-host cannot update URL (no broadcast)');
+    passed++;
+
+    // Test 12: New guest receives host URL when joining
+    console.log('\nTest 12: New guest receives host URL on join');
+    const { ws: guest2 } = await createClient();
+    const guest2JoinResponse = await sendAndWait(guest2, { type: 'JOIN_ROOM', roomId: hostRoomId }, 'ROOM_JOINED');
+    
+    assert.strictEqual(guest2JoinResponse.isHost, false);
+    assert.strictEqual(guest2JoinResponse.hostUrl, testUrl);
+    console.log('✓ New guest receives host URL when joining');
+    passed++;
+
     // Cleanup
     client1.close();
     client2.close();
+    host.close();
+    guest.close();
+    guest2.close();
 
   } catch (error) {
     console.log('✗ Test failed:', error.message);

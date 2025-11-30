@@ -30,8 +30,12 @@ const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 
 // Store client info
-// Map<WebSocket, { roomId: string }>
+// Map<WebSocket, { roomId: string, isHost: boolean }>
 const clients = new Map();
+
+// Store room host URLs
+// Map<roomId, string>
+const roomUrls = new Map();
 
 /**
  * Generate a unique client ID
@@ -81,6 +85,9 @@ function handleJoinRoom(ws, roomId) {
     handleLeaveRoom(ws, clientInfo.roomId, false);
   }
 
+  // Check if room exists (to determine if this client is the host)
+  const isHost = !rooms.has(roomId);
+
   // Create room if it doesn't exist
   if (!rooms.has(roomId)) {
     rooms.set(roomId, new Set());
@@ -90,14 +97,19 @@ function handleJoinRoom(ws, roomId) {
   const roomClients = rooms.get(roomId);
   roomClients.add(ws);
 
-  // Update client info
-  clients.set(ws, { roomId });
+  // Update client info with host status
+  clients.set(ws, { roomId, isHost });
 
-  // Notify the client they joined
+  // Get the host URL if available
+  const hostUrl = roomUrls.get(roomId);
+
+  // Notify the client they joined, including host URL if available
   sendMessage(ws, {
     type: 'ROOM_JOINED',
     roomId: roomId,
-    peerCount: roomClients.size
+    peerCount: roomClients.size,
+    isHost: isHost,
+    hostUrl: hostUrl || null
   });
 
   // Notify other clients in the room
@@ -106,7 +118,7 @@ function handleJoinRoom(ws, roomId) {
     peerCount: roomClients.size
   }, ws);
 
-  console.log(`Client joined room ${roomId}. Room now has ${roomClients.size} clients.`);
+  console.log(`Client joined room ${roomId}. Room now has ${roomClients.size} clients. isHost: ${isHost}`);
 }
 
 /**
@@ -122,9 +134,10 @@ function handleLeaveRoom(ws, roomId, notifyClient = true) {
   // Remove client from room
   roomClients.delete(ws);
 
-  // If room is empty, delete it
+  // If room is empty, delete it and clean up room URL
   if (roomClients.size === 0) {
     rooms.delete(roomId);
+    roomUrls.delete(roomId);
     console.log(`Room ${roomId} deleted (empty).`);
   } else {
     // Notify remaining clients
@@ -138,6 +151,7 @@ function handleLeaveRoom(ws, roomId, notifyClient = true) {
   const clientInfo = clients.get(ws);
   if (clientInfo) {
     clientInfo.roomId = null;
+    clientInfo.isHost = false;
   }
 
   if (notifyClient) {
@@ -177,6 +191,26 @@ function handleSyncVideoState(ws, roomId, state) {
 }
 
 /**
+ * Handle host URL update from a client
+ * @param {WebSocket} ws - The WebSocket client
+ * @param {string} roomId - The room ID
+ * @param {string} url - The current video page URL
+ */
+function handleUpdateHostUrl(ws, roomId, url) {
+  const clientInfo = clients.get(ws);
+  // Only allow host to update URL
+  if (clientInfo && clientInfo.isHost) {
+    roomUrls.set(roomId, url);
+    // Broadcast the URL to all other clients in the room
+    broadcastToRoom(roomId, {
+      type: 'HOST_URL_UPDATED',
+      url: url
+    }, ws);
+    console.log(`Host URL updated for room ${roomId}: ${url}`);
+  }
+}
+
+/**
  * Handle incoming WebSocket messages
  * @param {WebSocket} ws - The WebSocket client
  * @param {string} data - The raw message data
@@ -209,6 +243,12 @@ function handleMessage(ws, data) {
       case 'SYNC_VIDEO_STATE':
         if (message.roomId && message.state) {
           handleSyncVideoState(ws, message.roomId, message.state);
+        }
+        break;
+
+      case 'UPDATE_HOST_URL':
+        if (message.roomId && message.url) {
+          handleUpdateHostUrl(ws, message.roomId, message.url);
         }
         break;
 
