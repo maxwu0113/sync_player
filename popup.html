@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sync Player</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎬 Sync Player</h1>
+      <p class="subtitle">Watch videos together remotely</p>
+    </header>
+
+    <!-- Not in room state -->
+    <div id="not-in-room" class="section">
+      <button id="create-room-btn" class="btn btn-primary">
+        Create Room
+      </button>
+      
+      <div class="divider">
+        <span>or</span>
+      </div>
+      
+      <div class="join-section">
+        <input 
+          type="text" 
+          id="room-id-input" 
+          placeholder="Enter Room ID"
+          maxlength="6"
+          autocomplete="off"
+        >
+        <button id="join-room-btn" class="btn btn-secondary">
+          Join Room
+        </button>
+      </div>
+    </div>
+
+    <!-- In room state -->
+    <div id="in-room" class="section hidden">
+      <div class="room-info">
+        <div class="room-id-display">
+          <span class="label">Room ID</span>
+          <span id="current-room-id" class="value"></span>
+          <button id="copy-room-id" class="btn-icon" title="Copy Room ID">
+            📋
+          </button>
+        </div>
+        <div class="status">
+          <span id="connection-status" class="status-badge">Connected</span>
+        </div>
+      </div>
+      
+      <div class="sync-controls">
+        <button id="sync-now-btn" class="btn btn-primary">
+          🔄 Sync Now
+        </button>
+      </div>
+      
+      <button id="leave-room-btn" class="btn btn-danger">
+        Leave Room
+      </button>
+    </div>
+
+    <!-- Status messages -->
+    <div id="status-message" class="status-message hidden"></div>
+
+    <footer>
+      <p>Share the Room ID with friends to watch together!</p>
+    </footer>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
