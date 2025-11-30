@@ -1,6 +1,7 @@
 /**
  * Background service worker for Sync Player Chrome extension.
  * Handles communication between tabs and manages synchronization state.
+ * Supports cross-device synchronization via WebSocket signaling server.
  */
 
 // Store the current room information
@@ -9,6 +10,15 @@ let currentRoom = null;
 let connectedPeers = new Map();
 // WebSocket connection for real-time sync
 let wsConnection = null;
+// Reconnection settings
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_DELAY_MS = 2000;
+// Default signaling server URL
+// Users can host their own server using the code in /server directory
+// and change this URL to point to their server
+const DEFAULT_SIGNALING_SERVER = 'wss://sync-player-server.glitch.me';
+let signalingServerUrl = DEFAULT_SIGNALING_SERVER;
 
 /**
  * Generate a unique room ID using cryptographically secure random values
@@ -22,6 +32,217 @@ function generateRoomId() {
     .join('')
     .substring(0, 6)
     .toUpperCase();
+}
+
+/**
+ * Connect to the signaling server for cross-device sync
+ * @param {string} roomId - The room ID to join
+ */
+function connectToSignalingServer(roomId) {
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+    // Already connected, just join the room
+    wsConnection.send(JSON.stringify({
+      type: 'JOIN_ROOM',
+      roomId: roomId
+    }));
+    return;
+  }
+
+  try {
+    wsConnection = new WebSocket(signalingServerUrl);
+
+    wsConnection.onopen = () => {
+      console.log('Sync Player: Connected to signaling server');
+      reconnectAttempts = 0;
+      
+      // Join the room
+      wsConnection.send(JSON.stringify({
+        type: 'JOIN_ROOM',
+        roomId: roomId
+      }));
+
+      // Notify all tabs about connection status
+      broadcastConnectionStatus(true);
+    };
+
+    wsConnection.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        handleSignalingMessage(message);
+      } catch (error) {
+        console.error('Sync Player: Error parsing signaling message:', error);
+      }
+    };
+
+    wsConnection.onerror = (error) => {
+      console.error('Sync Player: WebSocket error:', error);
+      broadcastConnectionStatus(false);
+    };
+
+    wsConnection.onclose = () => {
+      console.log('Sync Player: Disconnected from signaling server');
+      broadcastConnectionStatus(false);
+      
+      // Attempt to reconnect if still in a room
+      if (currentRoom && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        reconnectAttempts++;
+        // Use exponential backoff with jitter to avoid thundering herd
+        const backoffDelay = RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts - 1) + Math.random() * 1000;
+        console.log(`Sync Player: Attempting to reconnect (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) in ${Math.round(backoffDelay)}ms`);
+        setTimeout(() => {
+          if (currentRoom) {
+            connectToSignalingServer(currentRoom.id);
+          }
+        }, backoffDelay);
+      }
+    };
+  } catch (error) {
+    console.error('Sync Player: Error connecting to signaling server:', error);
+    broadcastConnectionStatus(false);
+  }
+}
+
+/**
+ * Disconnect from the signaling server
+ */
+function disconnectFromSignalingServer() {
+  if (wsConnection) {
+    // Send leave message before closing
+    if (wsConnection.readyState === WebSocket.OPEN && currentRoom) {
+      wsConnection.send(JSON.stringify({
+        type: 'LEAVE_ROOM',
+        roomId: currentRoom.id
+      }));
+    }
+    wsConnection.close();
+    wsConnection = null;
+  }
+  reconnectAttempts = MAX_RECONNECT_ATTEMPTS; // Prevent auto-reconnect
+  broadcastConnectionStatus(false);
+}
+
+/**
+ * Handle messages from the signaling server
+ * @param {object} message - The message from the server
+ */
+function handleSignalingMessage(message) {
+  switch (message.type) {
+    case 'ROOM_JOINED':
+      console.log(`Sync Player: Joined room ${message.roomId} with ${message.peerCount} peers`);
+      if (currentRoom) {
+        currentRoom.peerCount = message.peerCount;
+      }
+      break;
+
+    case 'PEER_JOINED':
+      console.log('Sync Player: A peer joined the room');
+      if (currentRoom) {
+        currentRoom.peerCount = message.peerCount;
+      }
+      break;
+
+    case 'PEER_LEFT':
+      console.log('Sync Player: A peer left the room');
+      if (currentRoom) {
+        currentRoom.peerCount = message.peerCount;
+      }
+      break;
+
+    case 'VIDEO_EVENT':
+      // Received a video event from another device
+      handleRemoteVideoEvent(message.event);
+      break;
+
+    case 'SYNC_VIDEO_STATE':
+      // Received sync state from another device
+      handleRemoteSyncState(message.state);
+      break;
+
+    case 'ERROR':
+      console.error('Sync Player: Server error:', message.error);
+      break;
+  }
+}
+
+/**
+ * Handle video events from remote devices
+ * @param {object} event - The video event
+ */
+function handleRemoteVideoEvent(event) {
+  // Broadcast to all local tabs
+  chrome.tabs.query({}, (tabs) => {
+    tabs.forEach((tab) => {
+      chrome.tabs.sendMessage(tab.id, {
+        type: 'VIDEO_EVENT',
+        event: event
+      }).catch(() => {
+        // Ignore errors for tabs without content script
+      });
+    });
+  });
+}
+
+/**
+ * Handle sync state from remote devices
+ * @param {object} state - The video state
+ */
+function handleRemoteSyncState(state) {
+  // Apply state to all local tabs
+  chrome.tabs.query({}, (tabs) => {
+    tabs.forEach((tab) => {
+      chrome.tabs.sendMessage(tab.id, {
+        type: 'APPLY_VIDEO_STATE',
+        state: state
+      }).catch(() => {
+        // Ignore errors for tabs without content script
+      });
+    });
+  });
+}
+
+/**
+ * Broadcast connection status to all tabs
+ * @param {boolean} connected - Whether connected to signaling server
+ */
+function broadcastConnectionStatus(connected) {
+  chrome.tabs.query({}, (tabs) => {
+    tabs.forEach((tab) => {
+      chrome.tabs.sendMessage(tab.id, {
+        type: 'CONNECTION_STATUS',
+        connected: connected
+      }).catch(() => {
+        // Ignore errors
+      });
+    });
+  });
+}
+
+/**
+ * Send a video event to the signaling server for cross-device sync
+ * @param {object} event - The video event to send
+ */
+function sendVideoEventToServer(event) {
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN && currentRoom) {
+    wsConnection.send(JSON.stringify({
+      type: 'VIDEO_EVENT',
+      roomId: currentRoom.id,
+      event: event
+    }));
+  }
+}
+
+/**
+ * Send sync state to the signaling server for cross-device sync
+ * @param {object} state - The video state to send
+ */
+function sendSyncStateToServer(state) {
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN && currentRoom) {
+    wsConnection.send(JSON.stringify({
+      type: 'SYNC_VIDEO_STATE',
+      roomId: currentRoom.id,
+      state: state
+    }));
+  }
 }
 
 /**
@@ -42,7 +263,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'GET_ROOM_STATUS':
-      sendResponse({ room: currentRoom });
+      sendResponse({ 
+        room: currentRoom,
+        connected: wsConnection && wsConnection.readyState === WebSocket.OPEN
+      });
       return true;
 
     case 'SYNC_VIDEO_STATE':
@@ -70,8 +294,13 @@ function handleCreateRoom(sendResponse) {
   currentRoom = {
     id: roomId,
     isHost: true,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    peerCount: 1
   };
+  
+  // Connect to signaling server for cross-device sync
+  reconnectAttempts = 0;
+  connectToSignalingServer(roomId);
   
   // Store room info in chrome storage
   chrome.storage.local.set({ currentRoom }, () => {
@@ -93,8 +322,13 @@ function handleJoinRoom(roomId, sendResponse) {
   currentRoom = {
     id: roomId.toUpperCase(),
     isHost: false,
-    joinedAt: Date.now()
+    joinedAt: Date.now(),
+    peerCount: 1
   };
+
+  // Connect to signaling server for cross-device sync
+  reconnectAttempts = 0;
+  connectToSignalingServer(currentRoom.id);
 
   // Store room info in chrome storage
   chrome.storage.local.set({ currentRoom }, () => {
@@ -107,6 +341,9 @@ function handleJoinRoom(roomId, sendResponse) {
  * @param {function} sendResponse - Callback to send response
  */
 function handleLeaveRoom(sendResponse) {
+  // Disconnect from signaling server
+  disconnectFromSignalingServer();
+  
   currentRoom = null;
   chrome.storage.local.remove('currentRoom', () => {
     sendResponse({ success: true });
@@ -121,7 +358,7 @@ function handleLeaveRoom(sendResponse) {
 function handleSyncVideoState(state, senderTabId) {
   if (!currentRoom) return;
 
-  // Broadcast to all tabs except sender
+  // Broadcast to all local tabs except sender
   chrome.tabs.query({}, (tabs) => {
     tabs.forEach((tab) => {
       if (tab.id !== senderTabId) {
@@ -134,6 +371,9 @@ function handleSyncVideoState(state, senderTabId) {
       }
     });
   });
+
+  // Also send to signaling server for cross-device sync
+  sendSyncStateToServer(state);
 }
 
 /**
@@ -144,6 +384,7 @@ function handleSyncVideoState(state, senderTabId) {
 function broadcastVideoEvent(event, senderTabId) {
   if (!currentRoom) return;
 
+  // Broadcast to all local tabs except sender
   chrome.tabs.query({}, (tabs) => {
     tabs.forEach((tab) => {
       if (tab.id !== senderTabId) {
@@ -156,6 +397,9 @@ function broadcastVideoEvent(event, senderTabId) {
       }
     });
   });
+
+  // Also send to signaling server for cross-device sync
+  sendVideoEventToServer(event);
 }
 
 /**
@@ -165,6 +409,9 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.storage.local.get('currentRoom', (result) => {
     if (result.currentRoom) {
       currentRoom = result.currentRoom;
+      // Reconnect to signaling server for the existing room
+      reconnectAttempts = 0;
+      connectToSignalingServer(currentRoom.id);
     }
   });
 });

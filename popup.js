@@ -14,6 +14,7 @@ const copyRoomIdBtn = document.getElementById('copy-room-id');
 const roomIdInput = document.getElementById('room-id-input');
 const currentRoomIdDisplay = document.getElementById('current-room-id');
 const statusMessage = document.getElementById('status-message');
+const connectionStatus = document.getElementById('connection-status');
 
 /**
  * Show a status message to the user
@@ -36,16 +37,34 @@ function showStatus(message, type = 'info', duration = 3000) {
 /**
  * Update the UI based on current room state
  * @param {object|null} room - The current room info or null if not in a room
+ * @param {boolean} connected - Whether connected to signaling server
  */
-function updateUI(room) {
+function updateUI(room, connected = false) {
   if (room) {
     notInRoomSection.classList.add('hidden');
     inRoomSection.classList.remove('hidden');
     currentRoomIdDisplay.textContent = room.id;
+    
+    // Update connection status
+    updateConnectionStatus(connected);
   } else {
     notInRoomSection.classList.remove('hidden');
     inRoomSection.classList.add('hidden');
     roomIdInput.value = '';
+  }
+}
+
+/**
+ * Update the connection status display
+ * @param {boolean} connected - Whether connected to signaling server
+ */
+function updateConnectionStatus(connected) {
+  if (connected) {
+    connectionStatus.textContent = 'Connected';
+    connectionStatus.classList.remove('disconnected');
+  } else {
+    connectionStatus.textContent = 'Connecting...';
+    connectionStatus.classList.add('disconnected');
   }
 }
 
@@ -60,9 +79,11 @@ async function createRoom() {
     const response = await chrome.runtime.sendMessage({ type: 'CREATE_ROOM' });
     
     if (response.success) {
-      updateUI({ id: response.roomId, isHost: true });
-      showStatus('Room created successfully!', 'success');
+      updateUI({ id: response.roomId, isHost: true }, false);
+      showStatus('Room created! Connecting...', 'success');
       initializeVideoSync();
+      // Poll for connection status
+      pollConnectionStatus();
     } else {
       showStatus(response.error || 'Failed to create room', 'error');
     }
@@ -103,9 +124,11 @@ async function joinRoom() {
     });
     
     if (response.success) {
-      updateUI({ id: response.roomId, isHost: false });
-      showStatus('Joined room successfully!', 'success');
+      updateUI({ id: response.roomId, isHost: false }, false);
+      showStatus('Joined room! Connecting...', 'success');
       initializeVideoSync();
+      // Poll for connection status
+      pollConnectionStatus();
     } else {
       showStatus(response.error || 'Failed to join room', 'error');
     }
@@ -224,11 +247,43 @@ async function initializeVideoSync() {
 async function checkRoomStatus() {
   try {
     const response = await chrome.runtime.sendMessage({ type: 'GET_ROOM_STATUS' });
-    updateUI(response.room);
+    updateUI(response.room, response.connected);
   } catch (error) {
     console.error('Error checking room status:', error);
-    updateUI(null);
+    updateUI(null, false);
   }
+}
+
+/**
+ * Poll for connection status updates with exponential backoff
+ */
+function pollConnectionStatus() {
+  let attempts = 0;
+  const maxAttempts = 5;
+  
+  async function checkStatus() {
+    attempts++;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_ROOM_STATUS' });
+      if (response.connected) {
+        updateConnectionStatus(true);
+        showStatus('Connected to sync server!', 'success', 2000);
+        return; // Stop polling
+      } else if (attempts >= maxAttempts) {
+        updateConnectionStatus(false);
+        showStatus('Connection may be slow, sync still works locally', 'info', 3000);
+        return; // Stop polling
+      }
+      // Exponential backoff: 1s, 2s, 4s, 8s
+      const delay = Math.pow(2, attempts - 1) * 1000;
+      setTimeout(checkStatus, delay);
+    } catch (error) {
+      // Stop polling on error
+    }
+  }
+  
+  // Start first check after 1 second
+  setTimeout(checkStatus, 1000);
 }
 
 // Event listeners
