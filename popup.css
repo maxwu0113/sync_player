@@ -147,6 +147,33 @@ header h1 {
   gap: 8px;
 }
 
+/* Username section */
+.username-section {
+  margin-bottom: 16px;
+}
+
+.username-label {
+  display: block;
+  font-size: 12px;
+  color: #666;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.username-section input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.username-section input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
 .join-section input {
   flex: 1;
   padding: 12px 16px;
@@ -232,6 +259,70 @@ header h1 {
 .users-label {
   color: #666;
   font-size: 13px;
+}
+
+/* Users list */
+.users-list-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.users-list-header {
+  font-size: 12px;
+  color: #666;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.users-list {
+  list-style: none;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.users-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: white;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.users-list li:last-child {
+  margin-bottom: 0;
+}
+
+.users-list li .user-icon {
+  font-size: 14px;
+}
+
+.users-list li .user-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.users-list li.current-user {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+}
+
+.users-list li.current-user .user-name {
+  font-weight: 600;
+  color: #667eea;
+}
+
+.you-badge {
+  font-size: 10px;
+  background: #667eea;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 10px;
 }
 
 .status-badge {

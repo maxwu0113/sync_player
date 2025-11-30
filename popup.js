@@ -12,9 +12,15 @@ const leaveRoomBtn = document.getElementById('leave-room-btn');
 const syncNowBtn = document.getElementById('sync-now-btn');
 const copyRoomIdBtn = document.getElementById('copy-room-id');
 const roomIdInput = document.getElementById('room-id-input');
+const usernameInput = document.getElementById('username-input');
 const currentRoomIdDisplay = document.getElementById('current-room-id');
 const statusMessage = document.getElementById('status-message');
 const connectionStatus = document.getElementById('connection-status');
+const userCountDisplay = document.getElementById('user-count');
+const usersList = document.getElementById('users-list');
+
+// Current user's ID (for identifying self in user list)
+let currentUserId = null;
 
 /**
  * Show a status message to the user
@@ -38,8 +44,9 @@ function showStatus(message, type = 'info', duration = 3000) {
  * Update the UI based on current room state
  * @param {object|null} room - The current room info or null if not in a room
  * @param {boolean} connected - Whether connected to signaling server
+ * @param {Array} users - List of users in the room
  */
-function updateUI(room, connected = false) {
+function updateUI(room, connected = false, users = []) {
   if (room) {
     notInRoomSection.classList.add('hidden');
     inRoomSection.classList.remove('hidden');
@@ -47,6 +54,9 @@ function updateUI(room, connected = false) {
     
     // Update connection status
     updateConnectionStatus(connected);
+    
+    // Update user count and list
+    updateUsersList(users);
   } else {
     notInRoomSection.classList.remove('hidden');
     inRoomSection.classList.add('hidden');
@@ -69,6 +79,72 @@ function updateConnectionStatus(connected) {
 }
 
 /**
+ * Update the users list display
+ * @param {Array} users - List of users in the room
+ */
+function updateUsersList(users) {
+  // Update user count
+  const count = users.length || 1;
+  userCountDisplay.textContent = count;
+  
+  // Clear existing list
+  usersList.innerHTML = '';
+  
+  // If no users provided, show at least current user
+  if (!users || users.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'current-user';
+    li.innerHTML = `
+      <span class="user-icon">👤</span>
+      <span class="user-name">You</span>
+      <span class="you-badge">You</span>
+    `;
+    usersList.appendChild(li);
+    return;
+  }
+  
+  // Add each user to the list
+  users.forEach(user => {
+    const li = document.createElement('li');
+    const isCurrentUser = user.id === currentUserId;
+    
+    if (isCurrentUser) {
+      li.className = 'current-user';
+    }
+    
+    const displayName = user.name || 'Anonymous';
+    const escapedName = escapeHtml(displayName);
+    
+    li.innerHTML = `
+      <span class="user-icon">👤</span>
+      <span class="user-name">${escapedName}</span>
+      ${isCurrentUser ? '<span class="you-badge">You</span>' : ''}
+    `;
+    usersList.appendChild(li);
+  });
+}
+
+/**
+ * Escape HTML to prevent XSS
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/**
+ * Get the current username from input
+ * @returns {string} The username or a default value
+ */
+function getUsername() {
+  const name = usernameInput.value.trim();
+  return name || 'Anonymous';
+}
+
+/**
  * Create a new room
  */
 async function createRoom() {
@@ -76,13 +152,18 @@ async function createRoom() {
     createRoomBtn.disabled = true;
     createRoomBtn.textContent = 'Creating...';
 
-    const response = await chrome.runtime.sendMessage({ type: 'CREATE_ROOM' });
+    const username = getUsername();
+    const response = await chrome.runtime.sendMessage({ 
+      type: 'CREATE_ROOM',
+      username: username
+    });
     
     if (response.success) {
-      updateUI({ id: response.roomId, isHost: true }, false);
+      currentUserId = response.userId;
+      updateUI({ id: response.roomId, isHost: true }, false, response.users || []);
       showStatus('Room created! Connecting...', 'success');
       initializeVideoSync();
-      // Poll for connection status
+      // Poll for connection status and users
       pollConnectionStatus();
     } else {
       showStatus(response.error || 'Failed to create room', 'error');
@@ -118,16 +199,19 @@ async function joinRoom() {
     joinRoomBtn.disabled = true;
     joinRoomBtn.textContent = 'Joining...';
 
+    const username = getUsername();
     const response = await chrome.runtime.sendMessage({ 
       type: 'JOIN_ROOM', 
-      roomId 
+      roomId,
+      username: username
     });
     
     if (response.success) {
-      updateUI({ id: response.roomId, isHost: false }, false);
+      currentUserId = response.userId;
+      updateUI({ id: response.roomId, isHost: false }, false, response.users || []);
       showStatus('Joined room! Connecting...', 'success');
       initializeVideoSync();
-      // Poll for connection status
+      // Poll for connection status and users
       pollConnectionStatus();
     } else {
       showStatus(response.error || 'Failed to join room', 'error');
@@ -246,11 +330,18 @@ async function initializeVideoSync() {
  */
 async function checkRoomStatus() {
   try {
+    // Load saved username
+    const stored = await chrome.storage.local.get(['username']);
+    if (stored.username) {
+      usernameInput.value = stored.username;
+    }
+    
     const response = await chrome.runtime.sendMessage({ type: 'GET_ROOM_STATUS' });
-    updateUI(response.room, response.connected);
+    currentUserId = response.userId || null;
+    updateUI(response.room, response.connected, response.users || []);
   } catch (error) {
     console.error('Error checking room status:', error);
-    updateUI(null, false);
+    updateUI(null, false, []);
   }
 }
 
@@ -265,6 +356,12 @@ function pollConnectionStatus() {
     attempts++;
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_ROOM_STATUS' });
+      
+      // Update users list
+      if (response.users) {
+        updateUsersList(response.users);
+      }
+      
       if (response.connected) {
         updateConnectionStatus(true);
         showStatus('Connected to sync server!', 'success', 2000);
@@ -303,6 +400,12 @@ roomIdInput.addEventListener('keypress', (event) => {
 // Auto-uppercase room ID input
 roomIdInput.addEventListener('input', () => {
   roomIdInput.value = roomIdInput.value.toUpperCase();
+});
+
+// Save username when it changes
+usernameInput.addEventListener('change', () => {
+  const username = usernameInput.value.trim();
+  chrome.storage.local.set({ username });
 });
 
 // Initialize popup

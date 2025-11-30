@@ -15,6 +15,17 @@
 
     <!-- Not in room state -->
     <div id="not-in-room" class="section">
+      <div class="username-section">
+        <label for="username-input" class="username-label">Your Name</label>
+        <input 
+          type="text" 
+          id="username-input" 
+          placeholder="Enter your name"
+          maxlength="20"
+          autocomplete="off"
+        >
+      </div>
+      
       <button id="create-room-btn" class="btn btn-primary">
         Create Room
       </button>
@@ -54,6 +65,10 @@
           <span class="users-icon">👥</span>
           <span id="user-count" class="users-count">1</span>
           <span class="users-label">user(s) in room</span>
+        </div>
+        <div class="users-list-section">
+          <div class="users-list-header">Users in Room:</div>
+          <ul id="users-list" class="users-list"></ul>
         </div>
       </div>
       
