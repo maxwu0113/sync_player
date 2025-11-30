@@ -153,6 +153,15 @@ function handleSignalingMessage(message) {
       console.log(`Sync Player: Joined room ${message.roomId} with ${message.peerCount} peers`);
       if (currentRoom) {
         currentRoom.peerCount = message.peerCount;
+        currentRoom.isHost = message.isHost;
+        
+        // If this client is the host, send current URL to server
+        if (message.isHost) {
+          sendCurrentUrlToServer();
+        } else if (message.hostUrl) {
+          // If joining and host URL is available, open it in a new tab
+          openHostUrl(message.hostUrl);
+        }
       }
       // Update users list if provided
       if (message.users) {
@@ -164,6 +173,10 @@ function handleSignalingMessage(message) {
       console.log('Sync Player: A peer joined the room');
       if (currentRoom) {
         currentRoom.peerCount = message.peerCount;
+        // If we are host, send our URL to the server so new peers can receive it
+        if (currentRoom.isHost) {
+          sendCurrentUrlToServer();
+        }
       }
       // Update users list if provided
       if (message.users) {
@@ -197,6 +210,13 @@ function handleSignalingMessage(message) {
     case 'SYNC_VIDEO_STATE':
       // Received sync state from another device
       handleRemoteSyncState(message.state);
+      break;
+
+    case 'HOST_URL_UPDATED':
+      // Host URL was updated, open it if we're not the host
+      if (currentRoom && !currentRoom.isHost && message.url) {
+        openHostUrl(message.url);
+      }
       break;
 
     case 'ERROR':
@@ -238,6 +258,111 @@ function handleRemoteSyncState(state) {
         // Ignore errors for tabs without content script
       });
     });
+  });
+}
+
+/**
+ * Send the current tab URL to the signaling server
+ * Only called when this client is the host
+ */
+function sendCurrentUrlToServer() {
+  if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN || !currentRoom) {
+    return;
+  }
+
+  // Get the active tab's URL
+  chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+    // Handle potential chrome.runtime.lastError
+    if (chrome.runtime.lastError) {
+      console.error('Sync Player: Error querying tabs:', chrome.runtime.lastError.message);
+      return;
+    }
+    
+    if (tabs && tabs.length > 0 && tabs[0].url) {
+      const url = tabs[0].url;
+      // Only send if it's a valid http/https URL (not chrome:// or extension pages)
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        wsConnection.send(JSON.stringify({
+          type: 'UPDATE_HOST_URL',
+          roomId: currentRoom.id,
+          url: url
+        }));
+        console.log('Sync Player: Sent host URL to server:', url);
+      }
+    }
+  });
+}
+
+/**
+ * Open the host's URL in a new tab or navigate current tab
+ * @param {string} url - The URL to open
+ */
+function openHostUrl(url) {
+  if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+    console.log('Sync Player: Invalid host URL, skipping:', url);
+    return;
+  }
+
+  // Check if we already have a tab with this URL
+  chrome.tabs.query({}, (tabs) => {
+    // Handle potential chrome.runtime.lastError
+    if (chrome.runtime.lastError) {
+      console.error('Sync Player: Error querying tabs:', chrome.runtime.lastError.message);
+      return;
+    }
+    
+    const existingTab = tabs && tabs.find(tab => tab.url === url);
+    
+    if (existingTab) {
+      // If tab exists, focus on it
+      chrome.tabs.update(existingTab.id, { active: true }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Sync Player: Error focusing tab:', chrome.runtime.lastError.message);
+        } else {
+          console.log('Sync Player: Focused existing tab with host URL');
+        }
+      });
+    } else {
+      // Check if there's an active tab we should navigate
+      chrome.tabs.query({ active: true, lastFocusedWindow: true }, (activeTabs) => {
+        if (chrome.runtime.lastError) {
+          console.error('Sync Player: Error querying active tabs:', chrome.runtime.lastError.message);
+          return;
+        }
+        
+        if (activeTabs && activeTabs.length > 0) {
+          const activeTab = activeTabs[0];
+          // If the active tab is a video page (http/https), navigate it to the new URL
+          if (activeTab.url && (activeTab.url.startsWith('http://') || activeTab.url.startsWith('https://'))) {
+            chrome.tabs.update(activeTab.id, { url: url }, () => {
+              if (chrome.runtime.lastError) {
+                console.error('Sync Player: Error updating tab:', chrome.runtime.lastError.message);
+              } else {
+                console.log('Sync Player: Navigated current tab to host URL:', url);
+              }
+            });
+          } else {
+            // Otherwise open a new tab
+            chrome.tabs.create({ url: url, active: true }, () => {
+              if (chrome.runtime.lastError) {
+                console.error('Sync Player: Error creating tab:', chrome.runtime.lastError.message);
+              } else {
+                console.log('Sync Player: Opened host URL in new tab:', url);
+              }
+            });
+          }
+        } else {
+          // No active tab, create a new one
+          chrome.tabs.create({ url: url, active: true }, () => {
+            if (chrome.runtime.lastError) {
+              console.error('Sync Player: Error creating tab:', chrome.runtime.lastError.message);
+            } else {
+              console.log('Sync Player: Opened host URL in new tab:', url);
+            }
+          });
+        }
+      });
+    }
   });
 }
 
@@ -320,6 +445,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'VIDEO_EVENT':
       broadcastVideoEvent(message.event, sender.tab?.id);
       sendResponse({ success: true });
+      return true;
+
+    case 'UPDATE_HOST_URL':
+      // Host updates their current URL to share with peers
+      if (currentRoom && currentRoom.isHost) {
+        sendCurrentUrlToServer();
+        sendResponse({ success: true });
+      } else {
+        sendResponse({ success: false, error: 'Only host can update URL' });
+      }
       return true;
 
     default:
@@ -497,4 +632,34 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log('Sync Player extension installed');
   // Clear any stale room data on install/update
   chrome.storage.local.remove('currentRoom');
+});
+
+/**
+ * Listen for tab URL changes to sync video page navigation
+ * When the host navigates to a new video page, broadcast it to all participants
+ */
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Only process when URL changes and loading is complete
+  if (changeInfo.status === 'complete' && tab.url) {
+    // Only process if we're in a room and are the host
+    if (currentRoom && currentRoom.isHost) {
+      // Only send if it's a valid http/https URL
+      if (tab.url.startsWith('http://') || tab.url.startsWith('https://')) {
+        // Check if this is the active tab in the last focused window
+        chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+          // Handle potential chrome.runtime.lastError
+          if (chrome.runtime.lastError) {
+            console.error('Sync Player: Error querying active tabs:', chrome.runtime.lastError.message);
+            return;
+          }
+          
+          if (tabs && tabs.length > 0 && tabs[0].id === tabId) {
+            // Send the new URL to the server
+            sendCurrentUrlToServer();
+            console.log('Sync Player: Host navigated to new page, broadcasting URL:', tab.url);
+          }
+        });
+      }
+    }
+  }
 });
