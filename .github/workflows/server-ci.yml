@@ -1,0 +1,47 @@
+name: Server CI
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'server/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'server/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+
+    - name: Install dependencies
+      working-directory: ./server
+      run: npm install
+
+    - name: Run tests
+      working-directory: ./server
+      run: npm test
+
+    - name: Start server and health check
+      working-directory: ./server
+      run: |
+        npm start &
+        SERVER_PID=$!
+        sleep 2
+        curl -f http://localhost:8080/health || exit 1
+        kill $SERVER_PID
