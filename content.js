@@ -292,6 +292,16 @@ function startYouTubeAdMonitoring() {
   // Initialize the ad state
   isWatchingAd = isYouTubeAdPlaying();
   
+  // If an ad is already playing when monitoring starts (e.g., after switching videos),
+  // broadcast it immediately so other users know to wait
+  if (isWatchingAd && monitoredVideo) {
+    console.log('Sync Player: YouTube ad already playing at start, broadcasting ad state');
+    sendVideoEvent('pause', {
+      currentTime: monitoredVideo.currentTime,
+      isWatchingAd: true
+    });
+  }
+  
   // Check ad state periodically
   // 1 second provides good balance between responsiveness and performance
   // YouTube ads typically last 5-30 seconds, so 1s delay is acceptable
