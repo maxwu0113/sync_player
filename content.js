@@ -18,6 +18,8 @@ const SYNC_COOLDOWN_MS = 250;
 // YouTube ad state tracking
 let isWatchingAd = false;
 let adCheckInterval = null;
+// Ad check interval in milliseconds (1 second provides good balance between responsiveness and performance)
+const AD_CHECK_INTERVAL_MS = 1000;
 // UI overlay for ad waiting notification
 let adWaitingOverlay = null;
 
@@ -285,13 +287,14 @@ function startYouTubeAdMonitoring() {
   // Initialize the ad state
   isWatchingAd = isYouTubeAdPlaying();
   
-  // Check ad state every 1 second (reduced from 500ms for better performance)
+  // Check ad state periodically
+  // 1 second provides good balance between responsiveness and performance
+  // YouTube ads typically last 5-30 seconds, so 1s delay is acceptable
   adCheckInterval = setInterval(() => {
     const currentAdState = isYouTubeAdPlaying();
     
     // If ad state changed, broadcast it
     if (currentAdState !== isWatchingAd) {
-      const previousAdState = isWatchingAd;
       isWatchingAd = currentAdState;
       
       if (monitoredVideo) {
@@ -315,7 +318,7 @@ function startYouTubeAdMonitoring() {
         }
       }
     }
-  }, 1000); // Check every second
+  }, AD_CHECK_INTERVAL_MS);
   
   console.log('Sync Player: Started YouTube ad monitoring');
 }
@@ -327,7 +330,7 @@ function stopYouTubeAdMonitoring() {
   if (adCheckInterval) {
     clearInterval(adCheckInterval);
     adCheckInterval = null;
-    isWatchingAd = false;
+    // Don't reset isWatchingAd - let it maintain current state
     console.log('Sync Player: Stopped YouTube ad monitoring');
   }
 }
