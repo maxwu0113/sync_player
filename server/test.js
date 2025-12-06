@@ -207,12 +207,24 @@ function handleMessage(ws, message, roomUrls) {
 }
 
 function joinRoom(ws, roomId, userId, username, roomUrls) {
+  // Check if client is already in this room (rejoining)
   const clientInfo = clients.get(ws);
-  if (clientInfo && clientInfo.roomId) {
+  const isRejoining = clientInfo && clientInfo.roomId === roomId;
+  
+  // Leave any existing room first, but only if it's a different room
+  if (clientInfo && clientInfo.roomId && clientInfo.roomId !== roomId) {
     leaveRoom(ws, clientInfo.roomId, false, roomUrls);
   }
 
-  const isHost = !rooms.has(roomId);
+  // Determine if this client is the host
+  // If rejoining, preserve existing host status
+  // Otherwise, client is host if the room doesn't exist yet
+  let isHost;
+  if (isRejoining && clientInfo) {
+    isHost = clientInfo.isHost;
+  } else {
+    isHost = !rooms.has(roomId);
+  }
   
   if (!rooms.has(roomId)) {
     rooms.set(roomId, new Set());
@@ -223,7 +235,7 @@ function joinRoom(ws, roomId, userId, username, roomUrls) {
   clients.set(ws, { 
     roomId, 
     isHost,
-    userId: userId || 'test-user', 
+    userId: (isRejoining && clientInfo && clientInfo.userId) ? clientInfo.userId : (userId || 'test-user'),
     username: username || 'Anonymous' 
   });
 
@@ -239,7 +251,13 @@ function joinRoom(ws, roomId, userId, username, roomUrls) {
     users
   }));
   
-  broadcastToRoom(roomId, { type: 'PEER_JOINED', peerCount: roomClients.size, users }, ws);
+  // Only notify other clients if this is a new join, not a rejoin
+  if (!isRejoining) {
+    broadcastToRoom(roomId, { type: 'PEER_JOINED', peerCount: roomClients.size, users }, ws);
+  } else {
+    // For rejoining, just update users list without broadcasting join event
+    broadcastToRoom(roomId, { type: 'USERS_UPDATE', users });
+  }
 }
 
 function getRoomUsers(roomId) {
@@ -520,6 +538,73 @@ async function runTests() {
     assert.strictEqual(invalidRoomError.type, 'ERROR');
     console.log('✓ Invalid room ID rejected');
     passed++;
+
+    // Test 16: Rejoin same room preserves host status and doesn't broadcast PEER_JOINED
+    console.log('\nTest 16: Rejoin same room preserves host status');
+    const { ws: rejoinHost } = await createClient();
+    const { ws: rejoinGuest } = await createClient();
+    const rejoinRoomId = 'REJOIN01';
+    
+    // Host joins
+    const hostJoin1 = await sendAndWait(rejoinHost, { 
+      type: 'JOIN_ROOM', 
+      roomId: rejoinRoomId,
+      userId: 'host123',
+      username: 'HostUser'
+    }, 'ROOM_JOINED');
+    assert.strictEqual(hostJoin1.isHost, true, 'First join should make client host');
+    
+    // Guest joins
+    await sendAndWait(rejoinGuest, { 
+      type: 'JOIN_ROOM', 
+      roomId: rejoinRoomId,
+      userId: 'guest456',
+      username: 'GuestUser'
+    }, 'ROOM_JOINED');
+    
+    // Host rejoins same room - should NOT receive PEER_JOINED on guest
+    // Set up listener to catch any PEER_JOINED (should timeout)
+    let receivedPeerJoined = false;
+    let peerJoinedHandler;
+    const peerJoinedCheck = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        rejoinGuest.removeListener('message', peerJoinedHandler);
+        resolve(false);
+      }, 500); // 500ms timeout
+      peerJoinedHandler = (data) => {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === 'PEER_JOINED') {
+          clearTimeout(timer);
+          rejoinGuest.removeListener('message', peerJoinedHandler);
+          receivedPeerJoined = true;
+          resolve(true);
+        }
+      };
+      rejoinGuest.on('message', peerJoinedHandler);
+    });
+    
+    // Host rejoins
+    const hostJoin2 = await sendAndWait(rejoinHost, { 
+      type: 'JOIN_ROOM', 
+      roomId: rejoinRoomId,
+      userId: 'host123', // Same userId
+      username: 'HostUser'
+    }, 'ROOM_JOINED');
+    
+    // Check that host status is preserved
+    assert.strictEqual(hostJoin2.isHost, true, 'Rejoin should preserve host status');
+    assert.strictEqual(hostJoin2.peerCount, 2, 'Room should still have 2 clients');
+    
+    // Check that no PEER_JOINED was broadcast
+    await peerJoinedCheck;
+    assert.strictEqual(receivedPeerJoined, false, 'Rejoin should not broadcast PEER_JOINED');
+    
+    console.log('✓ Rejoin same room preserves host status and does not broadcast PEER_JOINED');
+    passed++;
+    
+    // Close test clients
+    rejoinHost.close();
+    rejoinGuest.close();
 
     // Cleanup
     client1.close();

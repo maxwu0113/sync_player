@@ -16,7 +16,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "ws": "^8.14.2"
+    "ws": "^8.17.1"
   },
   "engines": {
     "node": ">=14.0.0"
