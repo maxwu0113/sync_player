@@ -126,19 +126,31 @@ function getVideoState(video) {
 function applyVideoState(video, state) {
   if (!video || isSyncing) return;
 
-  // On YouTube, check if remote user is watching ad
-  if (isYouTube() && state.isWatchingAd) {
-    // Remote user is watching ad - pause our video and show notification
+  // On YouTube, handle ad synchronization
+  if (isYouTube()) {
     const localAdPlaying = isYouTubeAdPlaying();
-    if (!localAdPlaying && !video.paused) {
-      // We're not watching ad but remote user is - pause and show notification
-      video.pause();
+    const remoteAdPlaying = state.isWatchingAd === true;
+    
+    if (remoteAdPlaying && !localAdPlaying) {
+      // Remote user is watching ad, we are not - pause and wait
+      if (!video.paused) {
+        video.pause();
+      }
       showAdWaitingOverlay();
+      return; // Don't apply other state changes while remote user is watching ad
+    } else if (!remoteAdPlaying && localAdPlaying) {
+      // We're watching ad, remote user is not - show overlay to inform we're the ones causing the wait
+      // But don't interfere with our own ad playback
+      return; // Don't apply remote state while we're watching ad
+    } else {
+      // Either both watching ads or neither - hide overlay
+      hideAdWaitingOverlay();
+      if (localAdPlaying) {
+        // Both watching ads - don't sync
+        return;
+      }
+      // Neither watching ads - continue with normal sync
     }
-    return; // Don't apply other state changes while ad is playing remotely
-  } else {
-    // No remote ad playing - hide notification if shown
-    hideAdWaitingOverlay();
   }
 
   isSyncing = true;
@@ -270,26 +282,31 @@ function startYouTubeAdMonitoring() {
   // Stop any existing monitoring first
   stopYouTubeAdMonitoring();
   
-  // Check ad state every 500ms
+  // Initialize the ad state
+  isWatchingAd = isYouTubeAdPlaying();
+  
+  // Check ad state every 1 second (reduced from 500ms for better performance)
   adCheckInterval = setInterval(() => {
     const currentAdState = isYouTubeAdPlaying();
     
     // If ad state changed, broadcast it
     if (currentAdState !== isWatchingAd) {
+      const previousAdState = isWatchingAd;
       isWatchingAd = currentAdState;
       
       if (monitoredVideo) {
         // Broadcast the state change
         if (currentAdState) {
           // Ad started playing
-          console.log('Sync Player: YouTube ad detected, broadcasting pause');
+          console.log('Sync Player: YouTube ad detected, broadcasting ad state');
           sendVideoEvent('pause', {
             currentTime: monitoredVideo.currentTime,
             isWatchingAd: true
           });
         } else {
           // Ad finished, broadcast current state
-          console.log('Sync Player: YouTube ad finished');
+          console.log('Sync Player: YouTube ad finished, resuming sync');
+          // When ad finishes, send current play state
           sendVideoEvent(monitoredVideo.paused ? 'pause' : 'play', {
             currentTime: monitoredVideo.currentTime,
             playbackRate: monitoredVideo.playbackRate,
@@ -298,7 +315,7 @@ function startYouTubeAdMonitoring() {
         }
       }
     }
-  }, 500);
+  }, 1000); // Check every second
   
   console.log('Sync Player: Started YouTube ad monitoring');
 }
@@ -486,19 +503,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 function handleRemoteVideoEvent(event) {
   if (!monitoredVideo || isSyncing) return;
 
-  // On YouTube, check if remote user is watching ad
-  if (isYouTube() && event.isWatchingAd) {
-    // Remote user is watching ad - pause our video and show notification
+  // On YouTube, handle ad synchronization
+  if (isYouTube()) {
     const localAdPlaying = isYouTubeAdPlaying();
-    if (!localAdPlaying && !monitoredVideo.paused) {
-      // We're not watching ad but remote user is - pause and show notification
-      monitoredVideo.pause();
+    const remoteAdPlaying = event.isWatchingAd === true;
+    
+    if (remoteAdPlaying && !localAdPlaying) {
+      // Remote user is watching ad, we are not - pause and wait
+      if (!monitoredVideo.paused) {
+        monitoredVideo.pause();
+      }
       showAdWaitingOverlay();
+      return; // Don't process other events while remote user is watching ad
+    } else if (!remoteAdPlaying && localAdPlaying) {
+      // We're watching ad, remote user is not - don't sync their events
+      return;
+    } else {
+      // Either both watching ads or neither - hide overlay
+      hideAdWaitingOverlay();
+      if (localAdPlaying) {
+        // Both watching ads - don't sync
+        return;
+      }
+      // Neither watching ads - continue with normal sync
     }
-    return; // Don't process other events while remote user is watching ad
-  } else {
-    // No remote ad - hide overlay if shown
-    hideAdWaitingOverlay();
   }
 
   isSyncing = true;
