@@ -63,7 +63,8 @@ function connectToSignalingServer(roomId) {
   if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
     // Client-side protection: avoid sending JOIN_ROOM if already sent for this room
     // This reduces unnecessary network traffic and prevents potential issues
-    if (lastJoinedRoomId === roomId) {
+    // Also verify we're still in that room to handle edge cases where server disconnected us
+    if (lastJoinedRoomId === roomId && currentRoom && currentRoom.id === roomId) {
       console.log('Sync Player: Already sent JOIN_ROOM for room', roomId, '- skipping duplicate');
       return;
     }
@@ -235,6 +236,14 @@ function handleSignalingMessage(message) {
 
     case 'ERROR':
       console.error('Sync Player: Server error:', message.error);
+      break;
+    
+    case 'ROOM_LEFT':
+      // Server notified us that we left the room
+      console.log('Sync Player: Left room');
+      currentRoom = null;
+      roomUsers = [];
+      lastJoinedRoomId = null;
       break;
   }
 }
