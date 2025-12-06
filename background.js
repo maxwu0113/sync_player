@@ -15,6 +15,9 @@ let currentUserId = null;
 let currentUsername = 'Anonymous';
 // WebSocket connection for real-time sync
 let wsConnection = null;
+// Track the last room ID we sent a JOIN_ROOM message for
+// This prevents duplicate JOIN_ROOM messages for the same room
+let lastJoinedRoomId = null;
 // Reconnection settings
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -58,13 +61,21 @@ function generateUserId() {
  */
 function connectToSignalingServer(roomId) {
   if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-    // Already connected, just join the room
+    // Client-side protection: avoid sending JOIN_ROOM if already sent for this room
+    // This reduces unnecessary network traffic and prevents potential issues
+    if (lastJoinedRoomId === roomId) {
+      console.log('Sync Player: Already sent JOIN_ROOM for room', roomId, '- skipping duplicate');
+      return;
+    }
+    
+    // Already connected, join the room
     wsConnection.send(JSON.stringify({
       type: 'JOIN_ROOM',
       roomId: roomId,
       userId: currentUserId,
       username: currentUsername
     }));
+    lastJoinedRoomId = roomId;
     return;
   }
 
@@ -82,6 +93,7 @@ function connectToSignalingServer(roomId) {
         userId: currentUserId,
         username: currentUsername
       }));
+      lastJoinedRoomId = roomId;
 
       // Notify all tabs about connection status
       broadcastConnectionStatus(true);
@@ -104,6 +116,8 @@ function connectToSignalingServer(roomId) {
     wsConnection.onclose = () => {
       console.log('Sync Player: Disconnected from signaling server');
       broadcastConnectionStatus(false);
+      // Reset last joined room ID since connection is closed
+      lastJoinedRoomId = null;
       
       // Attempt to reconnect if still in a room
       if (currentRoom && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -549,6 +563,7 @@ function handleLeaveRoom(sendResponse) {
   currentRoom = null;
   roomUsers = [];
   currentUserId = null;
+  lastJoinedRoomId = null;
   
   chrome.storage.local.remove(['currentRoom', 'currentUserId'], () => {
     sendResponse({ success: true });
