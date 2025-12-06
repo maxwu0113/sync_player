@@ -15,6 +15,11 @@ const SEEK_THRESHOLD_SECONDS = 1;
 let lastSyncedTime = 0;
 // Sync cooldown period in milliseconds
 const SYNC_COOLDOWN_MS = 250;
+// YouTube ad state tracking
+let isWatchingAd = false;
+let adCheckInterval = null;
+// UI overlay for ad waiting notification
+let adWaitingOverlay = null;
 
 /**
  * Find the primary video element on the page
@@ -46,17 +51,71 @@ function findVideoElement() {
 }
 
 /**
+ * Check if current page is YouTube
+ * @returns {boolean} True if on YouTube
+ */
+function isYouTube() {
+  return window.location.hostname.includes('youtube.com') || 
+         window.location.hostname.includes('youtu.be');
+}
+
+/**
+ * Detect if a YouTube ad is currently playing
+ * @returns {boolean} True if an ad is playing
+ */
+function isYouTubeAdPlaying() {
+  if (!isYouTube()) return false;
+  
+  // Check for multiple indicators that an ad is playing
+  // Method 1: Check for ad-specific classes on the player
+  const player = document.querySelector('.html5-video-player');
+  if (player && player.classList.contains('ad-showing')) {
+    return true;
+  }
+  
+  // Method 2: Check for ad overlay/container
+  const adModule = document.querySelector('.video-ads.ytp-ad-module');
+  if (adModule) {
+    const adDisplay = window.getComputedStyle(adModule).display;
+    if (adDisplay !== 'none') {
+      return true;
+    }
+  }
+  
+  // Method 3: Check for ad player overlay
+  const adPlayerOverlay = document.querySelector('.ytp-ad-player-overlay');
+  if (adPlayerOverlay && window.getComputedStyle(adPlayerOverlay).display !== 'none') {
+    return true;
+  }
+  
+  // Method 4: Check for skip ad button or ad text
+  const adText = document.querySelector('.ytp-ad-text, .ytp-ad-preview-text');
+  if (adText && window.getComputedStyle(adText).display !== 'none') {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
  * Get the current state of a video element
  * @param {HTMLVideoElement} video - The video element
  * @returns {object} The video state
  */
 function getVideoState(video) {
-  return {
+  const state = {
     currentTime: video.currentTime,
     paused: video.paused,
     playbackRate: video.playbackRate,
     timestamp: Date.now()
   };
+  
+  // Add YouTube ad state if on YouTube
+  if (isYouTube()) {
+    state.isWatchingAd = isYouTubeAdPlaying();
+  }
+  
+  return state;
 }
 
 /**
@@ -66,6 +125,21 @@ function getVideoState(video) {
  */
 function applyVideoState(video, state) {
   if (!video || isSyncing) return;
+
+  // On YouTube, check if remote user is watching ad
+  if (isYouTube() && state.isWatchingAd) {
+    // Remote user is watching ad - pause our video and show notification
+    const localAdPlaying = isYouTubeAdPlaying();
+    if (!localAdPlaying && !video.paused) {
+      // We're not watching ad but remote user is - pause and show notification
+      video.pause();
+      showAdWaitingOverlay();
+    }
+    return; // Don't apply other state changes while ad is playing remotely
+  } else {
+    // No remote ad playing - hide notification if shown
+    hideAdWaitingOverlay();
+  }
 
   isSyncing = true;
 
@@ -108,18 +182,158 @@ function applyVideoState(video, state) {
 }
 
 /**
+ * Show overlay notification that other users are watching ads
+ */
+function showAdWaitingOverlay() {
+  // Don't create duplicate overlays
+  if (adWaitingOverlay && document.body.contains(adWaitingOverlay)) {
+    return;
+  }
+  
+  // Remove any existing overlay first
+  hideAdWaitingOverlay();
+  
+  // Create overlay element
+  adWaitingOverlay = document.createElement('div');
+  adWaitingOverlay.id = 'sync-player-ad-waiting-overlay';
+  adWaitingOverlay.innerHTML = `
+    <div style="
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      padding: 16px 24px;
+      border-radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      z-index: 9999999;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      animation: sync-player-fade-in 0.3s ease;
+    ">
+      <div style="
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        border-top-color: white;
+        border-radius: 50%;
+        animation: sync-player-spin 1s linear infinite;
+      "></div>
+      <div>
+        <div style="font-weight: 600; margin-bottom: 2px;">⏸️ Waiting for others</div>
+        <div style="font-size: 12px; opacity: 0.8;">Other users are watching ads...</div>
+      </div>
+    </div>
+  `;
+  
+  // Add animations via style tag if not already present
+  if (!document.getElementById('sync-player-animations')) {
+    const styleEl = document.createElement('style');
+    styleEl.id = 'sync-player-animations';
+    styleEl.textContent = `
+      @keyframes sync-player-spin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes sync-player-fade-in {
+        from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+        to { opacity: 1; transform: translateX(-50%) translateY(0); }
+      }
+    `;
+    document.head.appendChild(styleEl);
+  }
+  
+  document.body.appendChild(adWaitingOverlay);
+  console.log('Sync Player: Showing ad waiting overlay');
+}
+
+/**
+ * Hide the ad waiting overlay
+ */
+function hideAdWaitingOverlay() {
+  if (adWaitingOverlay && document.body.contains(adWaitingOverlay)) {
+    adWaitingOverlay.remove();
+    adWaitingOverlay = null;
+    console.log('Sync Player: Hiding ad waiting overlay');
+  }
+}
+
+/**
+ * Start monitoring YouTube ad state changes
+ */
+function startYouTubeAdMonitoring() {
+  // Stop any existing monitoring first
+  stopYouTubeAdMonitoring();
+  
+  // Check ad state every 500ms
+  adCheckInterval = setInterval(() => {
+    const currentAdState = isYouTubeAdPlaying();
+    
+    // If ad state changed, broadcast it
+    if (currentAdState !== isWatchingAd) {
+      isWatchingAd = currentAdState;
+      
+      if (monitoredVideo) {
+        // Broadcast the state change
+        if (currentAdState) {
+          // Ad started playing
+          console.log('Sync Player: YouTube ad detected, broadcasting pause');
+          sendVideoEvent('pause', {
+            currentTime: monitoredVideo.currentTime,
+            isWatchingAd: true
+          });
+        } else {
+          // Ad finished, broadcast current state
+          console.log('Sync Player: YouTube ad finished');
+          sendVideoEvent(monitoredVideo.paused ? 'pause' : 'play', {
+            currentTime: monitoredVideo.currentTime,
+            playbackRate: monitoredVideo.playbackRate,
+            isWatchingAd: false
+          });
+        }
+      }
+    }
+  }, 500);
+  
+  console.log('Sync Player: Started YouTube ad monitoring');
+}
+
+/**
+ * Stop monitoring YouTube ad state changes
+ */
+function stopYouTubeAdMonitoring() {
+  if (adCheckInterval) {
+    clearInterval(adCheckInterval);
+    adCheckInterval = null;
+    isWatchingAd = false;
+    console.log('Sync Player: Stopped YouTube ad monitoring');
+  }
+}
+
+/**
  * Send video event to background script
  * @param {string} eventType - The type of event
  * @param {object} data - Additional event data
  */
 function sendVideoEvent(eventType, data = {}) {
   if (isSyncing) return;
+  
+  // Add YouTube ad state if on YouTube
+  const eventData = { ...data };
+  if (isYouTube()) {
+    eventData.isWatchingAd = isYouTubeAdPlaying();
+  }
 
   chrome.runtime.sendMessage({
     type: 'VIDEO_EVENT',
     event: {
       eventType,
-      ...data,
+      ...eventData,
       timestamp: Date.now()
     }
   }).catch(() => {
@@ -149,6 +363,11 @@ function setupVideoListeners(video) {
   video.addEventListener('seeked', handleSeeked);
   // Rate change event handler
   video.addEventListener('ratechange', handleRateChange);
+  
+  // Start YouTube ad monitoring if on YouTube
+  if (isYouTube()) {
+    startYouTubeAdMonitoring();
+  }
 
   console.log('Sync Player: Video element monitoring started');
 }
@@ -164,6 +383,9 @@ function removeVideoListeners(video) {
   video.removeEventListener('pause', handlePause);
   video.removeEventListener('seeked', handleSeeked);
   video.removeEventListener('ratechange', handleRateChange);
+  
+  // Stop YouTube ad monitoring
+  stopYouTubeAdMonitoring();
 }
 
 /**
@@ -263,6 +485,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  */
 function handleRemoteVideoEvent(event) {
   if (!monitoredVideo || isSyncing) return;
+
+  // On YouTube, check if remote user is watching ad
+  if (isYouTube() && event.isWatchingAd) {
+    // Remote user is watching ad - pause our video and show notification
+    const localAdPlaying = isYouTubeAdPlaying();
+    if (!localAdPlaying && !monitoredVideo.paused) {
+      // We're not watching ad but remote user is - pause and show notification
+      monitoredVideo.pause();
+      showAdWaitingOverlay();
+    }
+    return; // Don't process other events while remote user is watching ad
+  } else {
+    // No remote ad - hide overlay if shown
+    hideAdWaitingOverlay();
+  }
 
   isSyncing = true;
 
