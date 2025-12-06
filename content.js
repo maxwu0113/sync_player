@@ -57,8 +57,13 @@ function findVideoElement() {
  * @returns {boolean} True if on YouTube
  */
 function isYouTube() {
-  return window.location.hostname.includes('youtube.com') || 
-         window.location.hostname.includes('youtu.be');
+  const hostname = window.location.hostname.toLowerCase();
+  // Check if hostname is exactly youtube.com or a subdomain of youtube.com
+  // Also check for youtu.be (YouTube's URL shortener)
+  return hostname === 'youtube.com' || 
+         hostname.endsWith('.youtube.com') ||
+         hostname === 'youtu.be' ||
+         hostname.endsWith('.youtu.be');
 }
 
 /**
