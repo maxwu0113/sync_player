@@ -104,28 +104,38 @@ function getRoomUsers(roomId) {
  * @param {string} username - The user's display name
  */
 function handleJoinRoom(ws, roomId, userId, username) {
-  // Leave any existing room first
+  // Check if client is already in this room (rejoining)
   const clientInfo = clients.get(ws);
-  if (clientInfo && clientInfo.roomId) {
+  const isRejoining = clientInfo && clientInfo.roomId === roomId;
+  
+  // Leave any existing room first, but only if it's a different room
+  if (clientInfo && clientInfo.roomId && clientInfo.roomId !== roomId) {
     handleLeaveRoom(ws, clientInfo.roomId, false);
   }
 
-  // Check if room exists (to determine if this client is the host)
-  const isHost = !rooms.has(roomId);
+  // Determine if this client is the host
+  // If rejoining, preserve existing host status
+  // Otherwise, client is host if the room doesn't exist yet
+  let isHost;
+  if (isRejoining && clientInfo) {
+    isHost = clientInfo.isHost;
+  } else {
+    isHost = !rooms.has(roomId);
+  }
 
   // Create room if it doesn't exist
   if (!rooms.has(roomId)) {
     rooms.set(roomId, new Set());
   }
 
-  // Add client to room
+  // Add client to room (Set.add is idempotent, won't duplicate)
   const roomClients = rooms.get(roomId);
   roomClients.add(ws);
 
-  // Update client info with user details
+  // Update client info with user details, preserving userId if rejoining
   clients.set(ws, { 
     roomId, 
-    userId: userId || generateClientId(),
+    userId: (isRejoining && clientInfo && clientInfo.userId) ? clientInfo.userId : (userId || generateClientId()),
     username: username || 'Anonymous',
     isHost
   });
@@ -146,14 +156,22 @@ function handleJoinRoom(ws, roomId, userId, username) {
     users: users
   });
 
-  // Notify other clients in the room
-  broadcastToRoom(roomId, {
-    type: 'PEER_JOINED',
-    peerCount: roomClients.size,
-    users: users
-  }, ws);
-
-  console.log(`Client ${username || 'Anonymous'} (${userId}) joined room ${roomId}. Room now has ${roomClients.size} clients. isHost: ${isHost}`);
+  // Only notify other clients if this is a new join, not a rejoin
+  if (!isRejoining) {
+    broadcastToRoom(roomId, {
+      type: 'PEER_JOINED',
+      peerCount: roomClients.size,
+      users: users
+    }, ws);
+    console.log(`Client ${username || 'Anonymous'} (${userId}) joined room ${roomId}. Room now has ${roomClients.size} clients. isHost: ${isHost}`);
+  } else {
+    // For rejoining, just update users list without broadcasting join event
+    broadcastToRoom(roomId, {
+      type: 'USERS_UPDATE',
+      users: users
+    });
+    console.log(`Client ${username || 'Anonymous'} (${userId}) rejoined room ${roomId}. Room has ${roomClients.size} clients. isHost: ${isHost}`);
+  }
 }
 
 /**
