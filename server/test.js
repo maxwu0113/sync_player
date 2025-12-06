@@ -565,16 +565,22 @@ async function runTests() {
     // Host rejoins same room - should NOT receive PEER_JOINED on guest
     // Set up listener to catch any PEER_JOINED (should timeout)
     let receivedPeerJoined = false;
+    let peerJoinedHandler;
     const peerJoinedCheck = new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(false), 500); // 500ms timeout
-      rejoinGuest.on('message', (data) => {
+      const timer = setTimeout(() => {
+        rejoinGuest.removeListener('message', peerJoinedHandler);
+        resolve(false);
+      }, 500); // 500ms timeout
+      peerJoinedHandler = (data) => {
         const msg = JSON.parse(data.toString());
         if (msg.type === 'PEER_JOINED') {
           clearTimeout(timer);
+          rejoinGuest.removeListener('message', peerJoinedHandler);
           receivedPeerJoined = true;
           resolve(true);
         }
-      });
+      };
+      rejoinGuest.on('message', peerJoinedHandler);
     });
     
     // Host rejoins
