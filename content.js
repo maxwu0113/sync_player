@@ -348,9 +348,9 @@ function stopYouTubeAdMonitoring() {
 function sendVideoEvent(eventType, data = {}) {
   if (isSyncing) return;
   
-  // Add YouTube ad state if on YouTube
+  // Add YouTube ad state if on YouTube and not already provided
   const eventData = { ...data };
-  if (isYouTube()) {
+  if (isYouTube() && eventData.isWatchingAd === undefined) {
     eventData.isWatchingAd = isYouTubeAdPlaying();
   }
 
