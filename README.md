@@ -9,6 +9,7 @@ A Chrome extension that allows users to remotely synchronize watching the same v
 - **Real-time Sync**: Automatically synchronize play, pause, seek, and playback speed
 - **Cross-Device Sync**: Sync video playback across different devices and browsers
 - **Works on Any Video**: Compatible with video elements on any website
+- **YouTube Ad Synchronization**: Automatically detects and synchronizes YouTube advertisements - all users wait for ads to finish before resuming playback
 
 ## Installation
 
@@ -46,6 +47,12 @@ A Chrome extension that allows users to remotely synchronize watching the same v
 
 4. **Manual Sync**:
    - Click "Sync Now" to manually broadcast your current video state to all room members
+
+5. **YouTube Ad Synchronization**:
+   - When watching YouTube videos together, the extension automatically detects when ads are playing
+   - If one user is watching an ad, other users will be paused and see a "Waiting for others" notification
+   - Once all users have finished watching ads, playback resumes automatically
+   - This ensures everyone stays synchronized and no one misses content while others watch ads
 
 ## Cross-Device Synchronization
 

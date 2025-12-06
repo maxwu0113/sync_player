@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Ad Sync - UI Demo</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f0f0;
+    }
+    
+    .demo-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    }
+    
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+    
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+    }
+    
+    .video-mockup {
+      position: relative;
+      width: 100%;
+      height: 500px;
+      background: #000;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    
+    .video-placeholder {
+      color: #666;
+      font-size: 18px;
+      text-align: center;
+    }
+    
+    .toggle-button {
+      margin: 20px 0;
+      padding: 12px 24px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    
+    .toggle-button:hover {
+      transform: translateY(-2px);
+    }
+    
+    .toggle-button:active {
+      transform: translateY(0);
+    }
+    
+    /* The actual notification overlay styles (copied from content.js) */
+    #sync-player-ad-waiting-overlay {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999999;
+    }
+    
+    .overlay-content {
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      padding: 16px 24px;
+      border-radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      animation: sync-player-fade-in 0.3s ease;
+    }
+    
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: sync-player-spin 1s linear infinite;
+    }
+    
+    .overlay-text-main {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    
+    .overlay-text-sub {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+    
+    @keyframes sync-player-spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    @keyframes sync-player-fade-in {
+      from { 
+        opacity: 0; 
+        transform: translateX(-50%) translateY(-10px); 
+      }
+      to { 
+        opacity: 1; 
+        transform: translateX(-50%) translateY(0); 
+      }
+    }
+    
+    .info-section {
+      margin-top: 30px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+    }
+    
+    .info-section h3 {
+      margin-top: 0;
+      color: #333;
+    }
+    
+    .info-section ul {
+      color: #666;
+      line-height: 1.8;
+    }
+    
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin-top: 30px;
+    }
+    
+    .feature-card {
+      padding: 20px;
+      background: white;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      transition: border-color 0.3s;
+    }
+    
+    .feature-card:hover {
+      border-color: #667eea;
+    }
+    
+    .feature-card h4 {
+      margin-top: 0;
+      color: #667eea;
+    }
+    
+    .feature-card p {
+      color: #666;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="demo-container">
+    <h1>🎬 YouTube Ad Synchronization Feature</h1>
+    <p class="subtitle">Interactive demonstration of the "Waiting for others" notification</p>
+    
+    <button class="toggle-button" onclick="toggleOverlay()">
+      Toggle Notification Overlay
+    </button>
+    
+    <div class="video-mockup">
+      <div class="video-placeholder">
+        <p style="font-size: 48px; margin: 0;">▶️</p>
+        <p>YouTube Video Player</p>
+        <p style="font-size: 14px; opacity: 0.7;">When an ad plays on another user's device, this video pauses</p>
+      </div>
+    </div>
+    
+    <div class="info-section">
+      <h3>How It Works</h3>
+      <ul>
+        <li><strong>Automatic Detection:</strong> The extension detects when YouTube ads are playing using multiple DOM indicators</li>
+        <li><strong>Real-time Sync:</strong> Ad state is synchronized between all users in the room every second</li>
+        <li><strong>User Notification:</strong> When someone else is watching an ad, you see the notification above and your video pauses</li>
+        <li><strong>Automatic Resume:</strong> When everyone finishes watching ads, playback resumes automatically</li>
+      </ul>
+    </div>
+    
+    <div class="feature-grid">
+      <div class="feature-card">
+        <h4>🎯 Smart Detection</h4>
+        <p>Uses 4 different methods to detect YouTube ads, ensuring reliable detection across different ad types and player states.</p>
+      </div>
+      
+      <div class="feature-card">
+        <h4>⚡ Performance Optimized</h4>
+        <p>Checks for ads every second - fast enough to be responsive, efficient enough to not impact performance.</p>
+      </div>
+      
+      <div class="feature-card">
+        <h4>🛡️ Secure</h4>
+        <p>Properly validates YouTube domains to prevent malicious sites from triggering the ad detection mechanism.</p>
+      </div>
+      
+      <div class="feature-card">
+        <h4>🎨 User-Friendly UI</h4>
+        <p>Clean, modern notification with smooth animations that doesn't interfere with video watching.</p>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    let overlayVisible = false;
+    
+    function toggleOverlay() {
+      overlayVisible = !overlayVisible;
+      
+      if (overlayVisible) {
+        showOverlay();
+      } else {
+        hideOverlay();
+      }
+    }
+    
+    function showOverlay() {
+      // Remove existing overlay if any
+      hideOverlay();
+      
+      // Create overlay
+      const overlay = document.createElement('div');
+      overlay.id = 'sync-player-ad-waiting-overlay';
+      overlay.innerHTML = `
+        <div class="overlay-content">
+          <div class="spinner"></div>
+          <div>
+            <div class="overlay-text-main">⏸️ Waiting for others</div>
+            <div class="overlay-text-sub">Other users are watching ads...</div>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(overlay);
+    }
+    
+    function hideOverlay() {
+      const overlay = document.getElementById('sync-player-ad-waiting-overlay');
+      if (overlay) {
+        overlay.remove();
+      }
+    }
+  </script>
+</body>
+</html>
